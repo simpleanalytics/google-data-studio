@@ -1,0 +1,25 @@
+{
+  "timeZone": "Europe/London",
+  "dependencies": {},
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "urlFetchWhitelist": [
+    "https://simpleanalytics.com/"
+  ],
+  "dataStudio": {
+    "name": "Simple Analytics",
+    "logoUrl": "https://simpleanalytics.com/apple-touch-icon.png",
+    "company": "Simple Analytics",
+    "companyUrl": "https://simpleanalytics.com/",
+    "addonUrl": "https://github.com/simpleanalytics/google-data-studio/",
+    "supportUrl": "https://simpleanalytics.com/contact",
+    "shortDescription": "Fetch data from Simple Analytics",
+    "description": "This connector lets users query data from Simple Analytics",
+    "authType": [
+      "NONE"
+    ],
+    "feeType": [
+      "FREE"
+    ]
+  }
+}
