@@ -242,6 +242,44 @@ function sendUserError(message) {
     .throwException();
 }
 
+// https://stackoverflow.com/a/14991797/747044
+function parseCSVRow(row) {
+  let arr = [];
+  let quote = false;  // 'true' means we're inside a quoted field
+
+  // Iterate over each character, keep track of current row and column (of the returned array)
+  for (var row = 0, col = 0, c = 0; c < row.length; c++) {
+    let cc = row[c], nc = row[c+1];        // Current character, next character
+    arr[row] = arr[row] || [];             // Create a new row if necessary
+    arr[row][col] = arr[row][col] || '';   // Create a new column (start with empty string) if necessary
+
+    // If the current character is a quotation mark, and we're inside a
+    // quoted field, and the next character is also a quotation mark,
+    // add a quotation mark to the current column and skip the next character
+    if (cc == '"' && quote && nc == '"') { arr[row][col] += cc; ++c; continue; }
+
+    // If it's just one quotation mark, begin/end quoted field
+    if (cc == '"') { quote = !quote; continue; }
+
+    // If it's a comma and we're not in a quoted field, move on to the next column
+    if (cc == ',' && !quote) { ++col; continue; }
+
+    // If it's a newline (CRLF) and we're not in a quoted field, skip the next character
+    // and move on to the next row and move to column 0 of that new row
+    if (cc == '\r' && nc == '\n' && !quote) { ++row; col = 0; ++c; continue; }
+
+    // If it's a newline (LF or CR) and we're not in a quoted field,
+    // move on to the next row and move to column 0 of that new row
+    if (cc == '\n' && !quote) { ++row; col = 0; continue; }
+    if (cc == '\r' && !quote) { ++row; col = 0; continue; }
+
+    // Otherwise, append the current character to the current column
+    arr[row][col] += cc;
+  }
+
+  return arr;
+}
+
 const isAdminUser = () => true;
 
 const getAuthType = () => ({ type: 'NONE' });
@@ -418,7 +456,7 @@ function getHostname(hostname) {
 // Get export URL from Simple Analytics
 function getExportUrl({ hostname, fields = [], timezone, start = "", end = "" } = {}) {
   const base = `https://simpleanalytics.com/api/export/visits`;
-  const query = `version=2&fields=${fields.join(',')}&hostname=${getHostname(hostname)}&start=${start}&end=${end}&timezone=${timezone}`
+  const query = `version=2&fields=${fields.join(',')}&hostname=${getHostname(hostname)}&start=${start}&end=${end}&timezone=${timezone}&app=googledatastudio`
   return `${base}?${query}`;
 }
 
@@ -456,13 +494,10 @@ function getData(request) {
     .filter((contentRow) => contentRow.trim() !== '')
     .map((contentRow, idx) => {
       // Remove starting and trailing double quotes
-      if (contentRow.startsWith('"') && contentRow.endsWith('"')) {
-        contentRow = contentRow.substring(1, contentRow.length - 1);
-      }
+      // and parse whole line into separate cells
+      const allValues = parseCSVRow(contentRow);
 
-      const allValues = contentRow.split(delimiter);
-
-      // Create an object with all serializers in it
+      // Create an object with all serializers in it:
       // { added_iso: [Function: serializer], ... }
       const serializers = Object.fromEntries(FIELDS
         .filter(({serializer}) => typeof serializer === 'function')
