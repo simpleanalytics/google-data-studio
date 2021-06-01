@@ -243,13 +243,13 @@ function sendUserError(message) {
 }
 
 // https://stackoverflow.com/a/14991797/747044
-function parseCSVRow(row) {
-  let arr = [];
+function parseCSVRow(str = '') {
+  const arr = [];
   let quote = false;  // 'true' means we're inside a quoted field
 
   // Iterate over each character, keep track of current row and column (of the returned array)
-  for (var row = 0, col = 0, c = 0; c < row.length; c++) {
-    let cc = row[c], nc = row[c+1];        // Current character, next character
+  for (let row = 0, col = 0, c = 0; c < str.length; c++) {
+    const cc = str[c], nc = str[c+1];        // Current character, next character
     arr[row] = arr[row] || [];             // Create a new row if necessary
     arr[row][col] = arr[row][col] || '';   // Create a new column (start with empty string) if necessary
 
@@ -277,7 +277,9 @@ function parseCSVRow(row) {
     arr[row][col] += cc;
   }
 
-  return arr;
+  if (arr && arr.length && arr[0] && arr[0].length) return arr[0];
+
+  return [];
 }
 
 const isAdminUser = () => true;
@@ -497,11 +499,15 @@ function getData(request) {
       // and parse whole line into separate cells
       const allValues = parseCSVRow(contentRow);
 
+      while (allValues && allValues.length < requestedFieldSlugs.length) {
+        allValues.push(null);
+      }
+
       // Create an object with all serializers in it:
       // { added_iso: [Function: serializer], ... }
       const serializers = Object.fromEntries(FIELDS
-        .filter(({serializer}) => typeof serializer === 'function')
-        .map(({slug, serializer}) => [slug, serializer]))
+        .filter(({ serializer }) => typeof serializer === 'function')
+        .map(({ slug, serializer }) => [slug, serializer]));
 
       const serializedValues = allValues.map((value, index) => {
         const fieldSlug = requestedFieldSlugs[index];
