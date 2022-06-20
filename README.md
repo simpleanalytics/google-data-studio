@@ -7,3 +7,5 @@ This connector lets users query data from [Simple Analytics](https://simpleanaly
 1. Click "Simple Analytics"
 1. Enter `hostname`, `api_key`, and your `timezone`
 1. Click "Connect"
+
+When using this connector you are subjected to our [general terms and conditions](https://simpleanalytics.com/general-terms-and-conditions) and [privacy policy](https://simpleanalytics.com/privacy).
