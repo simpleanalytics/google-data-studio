@@ -500,7 +500,7 @@ function getData(request) {
       const allValues = parseCSVRow(contentRow);
 
       while (allValues && allValues.length < requestedFieldSlugs.length) {
-        allValues.push(null);
+        allValues.push("");
       }
 
       // Create an object with all serializers in it:
