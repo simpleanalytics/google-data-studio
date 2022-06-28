@@ -19,8 +19,13 @@
     "privacyPolicyUrl": "https://simpleanalytics.com/privacy-policy",
     "termsOfServiceUrl": "https://simpleanalytics.com/general-terms-and-conditions",
     "shortDescription": "Fetch data from Simple Analytics",
-    "description": "This connector lets users query data from Simple Analytics",
-    "sources": [],
+    "description": "This connector lets you query analytics data from Simple Analytics. It's data that you collected via your websites. The connector needs access to simpleanalytics.com to get your analytics data.",
+    "templates": {
+      "default": "93606baa-294e-447c-8f41-0cc0e1326cb6"
+    },
+    "sources": [
+      "SIMPLE_ANALYTICS"
+    ],
     "authType": [
       "NONE"
     ],
