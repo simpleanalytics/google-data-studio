@@ -1,0 +1,15 @@
+{
+  "timeZone": "Europe/Amsterdam",
+  "dependencies": {},
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "dataStudio": {
+    "name": "ES API Connector (POC)",
+    "logoUrl": "https://www.gstatic.com/images/branding/product/1x/data_studio_48dp.png",
+    "company": "Simple Analytics",
+    "companyUrl": "https://simpleanalytics.com",
+    "addonUrl": "https://simpleanalytics.com",
+    "supportUrl": "https://simpleanalytics.com/contact",
+    "description": "POC connector for ES API - returns pageviews per day"
+  }
+}
