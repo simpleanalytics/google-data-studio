@@ -1,11 +1,18 @@
 /**
  * Looker Studio Community Connector - POC
- * Connects to ES API /api/looker/query endpoint
- * Returns aggregated pageviews per day
+ * Connects to the dashboard proxy endpoint.
+ * Supports pageviews per day and top paths by pageviews.
  */
 
-// Schema: only two fields for POC
-const SCHEMA = [
+const LOOKER_ENDPOINT = 'https://simpleanalytics.com/api/looker/query';
+const DEFAULT_TIMEZONE = 'Etc/UTC';
+const DEFAULT_TOP_PATHS_LIMIT = 20;
+const QUERY_SHAPES = {
+  TIMESERIES: 'timeseries',
+  TOP_PATHS: 'top_paths'
+};
+
+const FIELD_CATALOG = [
   {
     name: 'date',
     label: 'Date',
@@ -13,7 +20,18 @@ const SCHEMA = [
     semantics: {
       conceptType: 'DIMENSION',
       semanticType: 'YEAR_MONTH_DAY'
-    }
+    },
+    supportedShapes: [QUERY_SHAPES.TIMESERIES]
+  },
+  {
+    name: 'path',
+    label: 'Path',
+    dataType: 'STRING',
+    semantics: {
+      conceptType: 'DIMENSION',
+      semanticType: 'TEXT'
+    },
+    supportedShapes: [QUERY_SHAPES.TOP_PATHS]
   },
   {
     name: 'pageviews',
@@ -23,41 +41,29 @@ const SCHEMA = [
       conceptType: 'METRIC',
       semanticType: 'NUMBER',
       isReaggregatable: true
-    }
+    },
+    supportedShapes: [QUERY_SHAPES.TIMESERIES, QUERY_SHAPES.TOP_PATHS]
   }
 ];
 
-/**
- * Returns the authentication method required by the connector.
- * API key is passed via config, not OAuth.
- */
+const FIELD_CATALOG_BY_ID = FIELD_CATALOG.reduce(function(catalog, field) {
+  catalog[field.name] = field;
+  return catalog;
+}, {});
+
 function getAuthType() {
   return { type: 'NONE' };
 }
 
-/**
- * Returns true - allows debug features in Looker Studio.
- */
 function isAdminUser() {
   return true;
 }
 
-/**
- * Returns the user configuration form.
- */
-function getConfig(request) {
+function getConfig() {
   const cc = DataStudioApp.createCommunityConnector();
   const config = cc.getConfig();
 
   config.setDateRangeRequired(true);
-
-  config
-    .newTextInput()
-    .setId('baseUrl')
-    .setName('API Base URL')
-    .setHelpText('Base URL of the ES API (e.g., https://api.example.com)')
-    .setPlaceholder('https://api.example.com')
-    .setAllowOverride(false);
 
   config
     .newTextInput()
@@ -89,28 +95,167 @@ function getConfig(request) {
   return config.build();
 }
 
-/**
- * Returns the schema for this connector.
- */
-function getSchema(request) {
-  return { schema: SCHEMA };
+function getSchema() {
+  return { schema: FIELD_CATALOG.map(toSchemaField) };
 }
 
-/**
- * Fetches data from the API and returns rows for Looker Studio.
- */
 function getData(request) {
-  const { baseUrl, hostname, apiKey, timezone } = request.configParams;
-  const { startDate, endDate } = request.dateRange;
+  const requestedFieldIds = getRequestedFieldIds(request);
+  const queryPlan = buildQueryPlan(requestedFieldIds);
+  const config = getValidatedConfig(request);
+  const dateRange = getValidatedDateRange(request);
+  const url = buildUrl({
+    hostname: config.hostname,
+    startDate: dateRange.startDate,
+    endDate: dateRange.endDate,
+    timezone: config.timezone,
+    shape: queryPlan.shape,
+    limit: queryPlan.limit
+  });
 
-  // Build API URL
-  const url = buildUrl(baseUrl, hostname, startDate, endDate, timezone || 'Etc/UTC');
+  Logger.log(
+    JSON.stringify({
+      message: 'Fetching Looker data',
+      endpoint: LOOKER_ENDPOINT,
+      shape: queryPlan.shape,
+      requestedFieldIds: requestedFieldIds,
+      dateRange: dateRange,
+      hostname: config.hostname
+    })
+  );
 
-  // Log for debugging
-  Logger.log('Fetching URL: ' + url);
-  Logger.log('Requested fields: ' + JSON.stringify(request.fields));
+  const data = fetchJson(url, config.apiKey);
+  validateResponseRows(data, queryPlan.shape);
 
-  // Fetch data
+  const rows = data.rows.map(function(row) {
+    return {
+      values: requestedFieldIds.map(function(fieldId) {
+        return serializeValue(row[fieldId]);
+      })
+    };
+  });
+
+  Logger.log(
+    JSON.stringify({
+      message: 'Returning Looker data',
+      shape: queryPlan.shape,
+      rowCount: rows.length
+    })
+  );
+
+  return {
+    schema: requestedFieldIds.map(function(fieldId) {
+      return toSchemaField(FIELD_CATALOG_BY_ID[fieldId]);
+    }),
+    rows: rows
+  };
+}
+
+function getRequestedFieldIds(request) {
+  const fields = request && request.fields ? request.fields : [];
+  const requestedFieldIds = fields.map(function(field) {
+    return field.name;
+  });
+
+  if (!requestedFieldIds.length) {
+    throwUserError('Looker Studio did not request any fields.');
+  }
+
+  const invalidFields = requestedFieldIds.filter(function(fieldId) {
+    return !FIELD_CATALOG_BY_ID[fieldId];
+  });
+
+  if (invalidFields.length) {
+    throwUserError('Unsupported fields requested: ' + invalidFields.join(', '));
+  }
+
+  return requestedFieldIds;
+}
+
+function buildQueryPlan(requestedFieldIds) {
+  const dimensionIds = requestedFieldIds.filter(function(fieldId) {
+    return FIELD_CATALOG_BY_ID[fieldId].semantics.conceptType === 'DIMENSION';
+  });
+
+  if (dimensionIds.length > 1) {
+    throwUserError('This POC supports only one dimension at a time.');
+  }
+
+  const selectedDimension = dimensionIds[0] || null;
+  const shape = selectedDimension === 'path'
+    ? QUERY_SHAPES.TOP_PATHS
+    : QUERY_SHAPES.TIMESERIES;
+
+  const unsupportedFields = requestedFieldIds.filter(function(fieldId) {
+    return FIELD_CATALOG_BY_ID[fieldId].supportedShapes.indexOf(shape) === -1;
+  });
+
+  if (unsupportedFields.length) {
+    throwUserError(
+      'This POC does not support the selected field combination: ' +
+        unsupportedFields.join(', ')
+    );
+  }
+
+  return {
+    shape: shape,
+    limit: shape === QUERY_SHAPES.TOP_PATHS ? DEFAULT_TOP_PATHS_LIMIT : null
+  };
+}
+
+function getValidatedConfig(request) {
+  const configParams = request && request.configParams ? request.configParams : {};
+  const hostname = normalizeHostname(configParams.hostname);
+  const apiKey = normalizeText(configParams.apiKey);
+  const timezone = normalizeText(configParams.timezone) || DEFAULT_TIMEZONE;
+
+  if (!hostname) {
+    throwUserError('Please enter a valid website hostname.');
+  }
+
+  if (!apiKey) {
+    throwUserError('Please enter a valid API key.');
+  }
+
+  return {
+    hostname: hostname,
+    apiKey: apiKey,
+    timezone: timezone
+  };
+}
+
+function getValidatedDateRange(request) {
+  const dateRange = request && request.dateRange ? request.dateRange : {};
+  const startDate = normalizeText(dateRange.startDate);
+  const endDate = normalizeText(dateRange.endDate);
+
+  if (!startDate || !endDate) {
+    throwUserError('Looker Studio did not provide a valid date range.');
+  }
+
+  return {
+    startDate: startDate,
+    endDate: endDate
+  };
+}
+
+function buildUrl(options) {
+  const params = [
+    'hostname=' + encodeURIComponent(options.hostname),
+    'start=' + encodeURIComponent(options.startDate),
+    'end=' + encodeURIComponent(options.endDate),
+    'timezone=' + encodeURIComponent(options.timezone),
+    'shape=' + encodeURIComponent(options.shape)
+  ];
+
+  if (options.limit) {
+    params.push('limit=' + encodeURIComponent(String(options.limit)));
+  }
+
+  return LOOKER_ENDPOINT + '?' + params.join('&');
+}
+
+function fetchJson(url, apiKey) {
   const response = UrlFetchApp.fetch(url, {
     method: 'get',
     headers: {
@@ -121,57 +266,88 @@ function getData(request) {
   });
 
   const responseCode = response.getResponseCode();
-  if (responseCode !== 200) {
-    Logger.log('API Error: ' + response.getContentText());
-    throwUserError('API returned status ' + responseCode + ': ' + response.getContentText());
+  const responseText = response.getContentText();
+  let parsedResponse = null;
+
+  if (responseText) {
+    try {
+      parsedResponse = JSON.parse(responseText);
+    } catch (error) {
+      if (responseCode === 200) {
+        throwUserError('The API returned an invalid JSON response.');
+      }
+    }
   }
 
-  const data = JSON.parse(response.getContentText());
+  if (responseCode !== 200) {
+    const errorMessage = parsedResponse && parsedResponse.error
+      ? parsedResponse.error
+      : 'API returned status ' + responseCode + '.';
+    throwUserError(errorMessage);
+  }
 
-  // Map requested fields
-  const requestedFieldIds = request.fields.map(function(field) {
-    return field.name;
+  if (!parsedResponse || typeof parsedResponse !== 'object') {
+    throwUserError('The API returned an empty response.');
+  }
+
+  return parsedResponse;
+}
+
+function validateResponseRows(data, shape) {
+  if (!data || !Array.isArray(data.rows)) {
+    throwUserError('The API response did not include a valid rows array.');
+  }
+
+  const invalidRow = data.rows.find(function(row) {
+    if (!row || typeof row !== 'object') {
+      return true;
+    }
+
+    if (typeof row.pageviews !== 'number') {
+      return true;
+    }
+
+    if (shape === QUERY_SHAPES.TIMESERIES) {
+      return !/^\d{8}$/.test(String(row.date || ''));
+    }
+
+    return typeof row.path !== 'string' && row.path !== null;
   });
 
-  // Build rows based on requested fields
-  const rows = data.rows.map(function(row) {
-    return {
-      values: requestedFieldIds.map(function(fieldId) {
-        return row[fieldId];
-      })
-    };
-  });
+  if (invalidRow) {
+    throwUserError('The API response format was not valid for this chart.');
+  }
+}
 
-  Logger.log('Returning ' + rows.length + ' rows');
+function serializeValue(value) {
+  if (value === null || typeof value === 'undefined') {
+    return '';
+  }
 
+  return value;
+}
+
+function normalizeText(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeHostname(hostname) {
+  const normalized = normalizeText(hostname)
+    .replace(/^https?:\/\/((m|l|w{2,3}([0-9]+)?)\.)?([^?#]+)(.*)$/, '$4')
+    .replace(/^([^/]+)(.*)$/, '$1');
+
+  return normalized;
+}
+
+function toSchemaField(field) {
   return {
-    schema: request.fields.map(function(field) {
-      return SCHEMA.find(function(s) { return s.name === field.name; });
-    }),
-    rows: rows
+    name: field.name,
+    label: field.label,
+    dataType: field.dataType,
+    semantics: field.semantics
   };
 }
 
-/**
- * Builds the API URL with query parameters.
- */
-function buildUrl(baseUrl, hostname, startDate, endDate, timezone) {
-  // Remove trailing slash from baseUrl if present
-  const base = baseUrl.replace(/\/+$/, '');
-  
-  const params = [
-    'hostname=' + encodeURIComponent(hostname),
-    'start=' + encodeURIComponent(startDate),
-    'end=' + encodeURIComponent(endDate),
-    'timezone=' + encodeURIComponent(timezone)
-  ].join('&');
-
-  return base + '/api/looker/query?' + params;
-}
-
-/**
- * Throws a user-facing error.
- */
 function throwUserError(message) {
   DataStudioApp.createCommunityConnector()
     .newUserError()

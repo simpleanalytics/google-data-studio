@@ -8,9 +8,9 @@
 
 **Target outcome**  
 Enable users to build their own Looker Studio charts/dashboards while keeping performance acceptable by:
-- **Pushing down aggregation + filtering** into Elasticsearch (via your Node API),
+- **Pushing down aggregation + filtering** into Elasticsearch (via your APIs),
 - Returning **small, already-aggregated tabular results** to Looker Studio,
-- Adding **caching + guardrails** to prevent expensive “accidental” queries.
+- Adding **guardrails** to prevent expensive “accidental” queries.
 
 ---
 
@@ -28,7 +28,7 @@ Enable users to build their own Looker Studio charts/dashboards while keeping pe
 3. **Node API owns complexity**  
    Node should:
    - Translate generic query → ES DSL
-   - Apply caching, limits, protections
+   - Apply limits and protections
    - Flatten ES buckets → table rows
 
 4. **Observability-first**  
@@ -61,14 +61,17 @@ flowchart LR
 ```mermaid
 flowchart LR
   LS[Looker Studio Report] --> CC[Community Connector (Apps Script)]
-  CC -->|POST /looker/query| API[Node API]
+  CC -->|GET /api/looker/query| DASH[Dashboard proxy]
+  DASH -->|forward validated request| API[Elasticsearch API]
   API -->|ES aggregations| ES[(Elasticsearch)]
-  API -->|flat rows + schema| CC
+  API -->|flat rows + schema| DASH
+  DASH -->|flat rows + schema| CC
   CC -->|return rows| LS
 ```
 
 **Key changes**
 - Connector requests *aggregated* results.
+- Connector talks to the dashboard proxy, not directly to `elasticsearch-api`.
 - ES does grouping/histograms.
 - Payloads become small and fast.
 
@@ -83,22 +86,29 @@ flowchart LR
   - numeric fields for metrics (duration, scroll)
 - Confirm unique visitor key strategy (e.g., session_id / visitor_id).
 
-### B) Node API
-- Add a generic endpoint (recommended): `POST /looker/query`
+### B) Dashboard proxy
+- Expose the connector-facing endpoint: `GET /api/looker/query`
+- Authenticate via `Api-Key`
+- Validate tenant access and sanitize request input
+- Forward only supported params to elasticsearch-api
+
+### C) Elasticsearch API
+- Keep the aggregation implementation behind the dashboard proxy
+- Evolve the current POC route into the real query contract
 - Translate payload → ES query DSL
 - Return flat table
-- Add caching, rate limiting, and guardrails
+- Add rate limiting and guardrails where needed
 
-### C) Looker Studio Community Connector (Apps Script)
+### D) Looker Studio Community Connector (Apps Script)
 - Expose a schema with **Dimensions** and **Metrics**
-- Map Looker `getData(request)` → Node API query
+- Map Looker `getData(request)` → dashboard proxy query
 - Return rows
 
-### D) Looker Studio report(s) for testing
+### E) Looker Studio report(s) for testing
 - A dedicated internal “Connector Test Dashboard” to exercise query shapes.
 
-### E) Tooling for local dev + replay tests
-- Tunnel (ngrok/Cloudflare Tunnel) so Apps Script can reach local Node.
+### F) Tooling for local dev + replay tests
+- Tunnel (ngrok/Cloudflare Tunnel) so Apps Script can reach local dashboard when needed.
 - Capture real Looker requests and replay them against Node.
 
 ---
@@ -107,7 +117,7 @@ flowchart LR
 
 ### Goal
 Prove the **aggregate flow** works end-to-end:
-Looker → Connector → Node → ES → Node → Connector → Looker  
+Looker → Connector → Dashboard proxy → Elasticsearch API → ES → Elasticsearch API → Dashboard proxy → Connector → Looker  
 …without immediately solving every combination of dimensions/metrics.
 
 ### POC scope
@@ -126,14 +136,16 @@ Support **2 hardcoded query shapes** (enough to validate the architecture):
 - Limit: 20
 
 ### Implementation approach (POC)
-- Add two Node endpoints (temporary):
-  - `GET /looker/poc/pageviews_timeseries?hostname=...&start=...&end=...&tz=...`
-  - `GET /looker/poc/top_paths?hostname=...&start=...&end=...&limit=20`
+- Keep `v1` untouched and do all connector work in `v2`.
+- Add two temporary query shapes behind the dashboard proxy:
+  - pageviews time series
+  - top paths
 - Connector:
   - Expose only the minimal fields needed for the 2 charts (POC schema).
-  - In `getData()`, detect the requested field combination and call the matching endpoint.
+  - In `getData()`, detect the requested field combination and call the matching dashboard-backed route.
+  - Hardcode the dashboard proxy endpoint instead of asking the user for a base URL.
 
-> Why hardcode first: You eliminate ambiguity. If the POC is slow/incorrect, you know the issue is infra/limits/caching, not generic query logic.
+> Why hardcode first: You eliminate ambiguity. If the POC is slow or incorrect, you know the issue is query behavior or infrastructure, not generic query logic or per-user endpoint configuration.
 
 ---
 
@@ -141,7 +153,7 @@ Support **2 hardcoded query shapes** (enough to validate the architecture):
 
 #### POC Test 1 — Node endpoint correctness (no Looker involved yet)
 **How**
-- Use Postman/curl to call each POC endpoint with known date ranges.
+- Use Postman/curl to call each dashboard-backed POC endpoint with known date ranges.
 - Compare results with a reference query directly in ES (Kibana/Dev Tools) or an internal admin endpoint.
 
 **What to verify**
@@ -159,7 +171,7 @@ Support **2 hardcoded query shapes** (enough to validate the architecture):
 
 #### POC Test 2 — Connector can consume endpoint and return rows
 **How**
-- Point connector config to the POC endpoints (via base URL).
+- Use the hardcoded dashboard proxy endpoint in the connector.
 - In Apps Script logs, print:
   - requested fields
   - dateRange
@@ -191,7 +203,6 @@ Support **2 hardcoded query shapes** (enough to validate the architecture):
 - Charts render within acceptable time.
 - Correctness visually matches expectations.
 - Request volume is understood (how many times `getData()` is called per load).
-- If you add cache, confirm repeated reload is faster.
 
 **Exit criteria**
 - Both charts load consistently with no errors.
@@ -342,19 +353,9 @@ Guardrails:
 
 ---
 
-### Milestone 5 — Performance hardening: caching, concurrency, quotas
+### Milestone 5 — Performance hardening: concurrency, quotas, payload controls
 
 #### Deliverables
-**Caching (Node)**
-- Cache key based on normalized request payload:
-  - hostname, dateRange, dims, metrics, filters, order, limit, timezone
-- TTL suggestions:
-  - 10–60 seconds for interactive dashboards
-  - optionally longer for historical ranges
-- Cache storage:
-  - in-memory LRU for single instance
-  - Redis for multi-instance (optional)
-
 **Concurrency protection**
 - Rate-limit per API key / hostname.
 - Debounce duplicate in-flight identical queries (request coalescing).
@@ -364,10 +365,10 @@ Guardrails:
 - Strict maximum response body size.
 
 #### Testing before moving on
-**Test 1: Cache effectiveness**
+**Test 1: Repeated-load behavior**
 - Open the Looker report in incognito.
 - Reload rapidly.
-- Confirm cache hit rate via logs and lowered ES query volume.
+- Confirm query volume, rate limits, and response times stay acceptable.
 
 **Test 2: Load simulation**
 - Replay captured Looker query fixtures in parallel (k6/artillery or a simple script).
@@ -377,7 +378,7 @@ Guardrails:
   - error rates
 
 **Exit criteria**
-- Demonstrable reduction in ES load and improved p95 latency vs export approach.
+- Stable p50/p95 latency and protected ES load versus the export approach.
 
 ---
 
@@ -402,14 +403,12 @@ Guardrails:
 **Monitoring**
 - Metrics:
   - request rate
-  - cache hit rate
   - ES query time
   - response time
   - error counts by type
 - Logging:
   - request id
   - normalized query key
-  - duration breakdown (cache vs ES)
   - row count returned
 
 #### Testing before launch
@@ -430,9 +429,9 @@ Guardrails:
 ## 5) Recommended testing toolkit & workflow
 
 ### 5.1 Local dev workflow (fast + realistic)
-1. Run Node API locally.
-2. Expose Node via tunnel (ngrok/Cloudflare Tunnel).
-3. Connector config includes `baseUrl` (dev vs prod).
+1. Run dashboard and elasticsearch-api locally.
+2. Expose the local dashboard via tunnel (ngrok/Cloudflare Tunnel).
+3. Connector hardcodes the dashboard proxy endpoint; for local testing use a temporary dev constant or a dev build.
 4. Push connector code to Apps Script.
 5. Test in Looker Studio “Connector Test Dashboard”.
 
@@ -471,7 +470,6 @@ This turns “debugging Looker” into repeatable tests.
 - [ ] Connector schema uses metrics properly
 
 ### Production acceptance
-- [ ] Caching improves repeat loads measurably
 - [ ] Guardrails prevent runaway bucket queries
 - [ ] Monitoring dashboards exist for API + ES performance
 
@@ -529,7 +527,7 @@ This turns “debugging Looker” into repeatable tests.
    - keyword fields for group-by
 
 2. **Build POC Node endpoints**
-   - time series + top paths
+   - dashboard-backed time series + top paths
 
 3. **Create POC connector schema + routing**
    - only the fields needed for the two charts
@@ -553,7 +551,6 @@ This turns “debugging Looker” into repeatable tests.
 
 ### Node logs (sanitized)
 - queryKey (hash)
-- cache hit/miss
 - ES request time
 - total time
 - row count returned

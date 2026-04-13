@@ -1,6 +1,6 @@
 # Looker Studio Connector Setup & Testing Plan
 
-This guide walks you through setting up the new POC connector (`google-looker-studio-connector/`) in Looker Studio and testing it according to the implementation plan.
+This guide walks you through setting up the `v2` POC connector in Looker Studio and testing it according to the implementation plan.
 
 ---
 
@@ -9,7 +9,7 @@ This guide walks you through setting up the new POC connector (`google-looker-st
 Before starting, ensure you have:
 - [ ] Access to Google Apps Script (script.google.com)
 - [ ] A Google account with Looker Studio access
-- [ ] Your Node API running and accessible (either deployed or via tunnel)
+- [ ] Access to the dashboard proxy endpoint used by the connector
 - [ ] API key for authentication
 - [ ] A hostname with data in Elasticsearch
 
@@ -27,7 +27,7 @@ Before starting, ensure you have:
 
 1. In the Apps Script editor, you'll see a default `Code.gs` file
 2. **Delete all existing content** in `Code.gs`
-3. **Copy the entire contents** of `google-looker-studio-connector/Code.gs` and paste it into the editor
+3. **Copy the entire contents** of `v2/Code.gs` and paste it into the editor
 
 ### Step 3: Configure the Manifest (appsscript.json)
 
@@ -35,7 +35,7 @@ Before starting, ensure you have:
 2. Check the box: **"Show 'appsscript.json' manifest file in editor"**
 3. Go back to the Editor
 4. Click on `appsscript.json` in the file list
-5. **Replace the entire content** with the contents of `google-looker-studio-connector/appsscript.json`:
+5. **Replace the entire content** with the contents of `v2/appscript.json`:
 
 ```json
 {
@@ -60,7 +60,7 @@ Before starting, ensure you have:
 1. Click **Deploy** > **New deployment**
 2. Click the gear icon next to "Select type" and choose **Add-on** > **Looker Studio**
 3. Fill in:
-   - **Description**: `POC v1` (or similar)
+   - **Description**: `POC v2` (or similar)
 4. Click **Deploy**
 5. **Copy the Deployment ID** - you'll need this to connect in Looker Studio
 
@@ -72,9 +72,9 @@ After deployment, note down:
 
 ---
 
-## Part 2: Set Up Local Development (Optional but Recommended)
+## Part 2: Set Up Local Development (Optional)
 
-If your Node API is running locally, you need to expose it via a tunnel.
+The connector should use a hardcoded dashboard proxy endpoint in production. If you want to test against local infrastructure, temporarily switch the endpoint constant in `v2/Code.gs` to your local dashboard URL and expose that dashboard URL via a tunnel.
 
 ### Option A: Using ngrok
 
@@ -82,7 +82,7 @@ If your Node API is running locally, you need to expose it via a tunnel.
 # Install ngrok if you haven't
 brew install ngrok
 
-# Start your Node API (assuming it runs on port 3000)
+# Start your dashboard app (assuming it runs on port 3000)
 npm run dev
 
 # In another terminal, expose it
@@ -123,10 +123,11 @@ Fill in the configuration fields:
 
 | Field | Value | Notes |
 |-------|-------|-------|
-| **API Base URL** | `https://your-api.com` or `https://abc123.ngrok.io` | Your Node API URL (no trailing slash) |
 | **Website Hostname** | `example.com` | The hostname to query data for |
 | **API Key** | `sa_api_key_xxx` | Your API key for authentication |
 | **Timezone** | Select appropriate timezone | e.g., `Europe/Amsterdam` |
+
+The connector endpoint itself should be hardcoded to the dashboard proxy and should not be entered by the user during setup.
 
 ### Step 3: Authorize and Connect
 
@@ -146,8 +147,8 @@ Fill in the configuration fields:
 **Goal**: Verify the API returns correct data before testing in Looker Studio.
 
 ```bash
-# Test the /api/looker/query endpoint directly
-curl -X GET "https://your-api.com/api/looker/query?hostname=example.com&start=2026-01-01&end=2026-01-31&timezone=Europe/Amsterdam" \
+# Test the dashboard proxy endpoint directly
+curl -X GET "https://simpleanalytics.com/api/looker/query?hostname=example.com&start=2026-01-01&end=2026-01-31&timezone=Europe/Amsterdam" \
   -H "Api-Key: sa_api_key_xxx" \
   -H "Content-Type: application/json"
 ```
@@ -221,7 +222,7 @@ curl -X GET "https://your-api.com/api/looker/query?hostname=example.com&start=20
 | Default load | Open report | Charts render with default date range (last 28 days) |
 | 7-day range | Set date range to last 7 days | Charts update, show 7 data points |
 | 90-day range | Set date range to last 90 days | Charts update, show 90 data points |
-| Reload (cache) | Refresh the page | Charts reload quickly (cached) |
+| Reload | Refresh the page | Charts reload consistently and without errors |
 | Incognito | Open report in incognito window | Charts still render (no session issues) |
 
 **Verify**:
@@ -238,15 +239,14 @@ curl -X GET "https://your-api.com/api/looker/query?hostname=example.com&start=20
 ### Issue: "API returned status 4XX"
 
 **Check**:
-- Is the API URL correct? (no trailing slash)
 - Is the API key valid?
 - Is the hostname correct?
-- Is the API running and accessible?
+- Is the dashboard proxy endpoint reachable?
 
 **Debug**:
 ```bash
 # Test API directly
-curl -v "https://your-api.com/api/looker/query?hostname=example.com&start=2026-01-01&end=2026-01-31&timezone=UTC" \
+curl -v "https://simpleanalytics.com/api/looker/query?hostname=example.com&start=2026-01-01&end=2026-01-31&timezone=UTC" \
   -H "Api-Key: your-key"
 ```
 
@@ -257,7 +257,6 @@ curl -v "https://your-api.com/api/looker/query?hostname=example.com&start=2026-0
 - Response payload is too large
 
 **Fix**:
-- Add caching to Node API
 - Reduce date range
 - Check ES query performance
 
@@ -280,7 +279,7 @@ curl -v "https://your-api.com/api/looker/query?hostname=example.com&start=2026-0
 
 ## Part 6: Comparison with Old Connector
 
-The old connector (root `Code.gs`) uses CSV export:
+The old connector (`v1/Code.gs`) uses CSV export:
 - Fetches raw rows from `/api/export/visits`
 - Parses CSV in Apps Script
 - Returns all raw event data
@@ -309,7 +308,7 @@ Once the POC is validated, proceed with the implementation plan milestones:
 2. **Milestone 2**: Expand schema with more dimensions/metrics
 3. **Milestone 3**: Add filter support
 4. **Milestone 4**: Support multiple dimensions (composite aggs)
-5. **Milestone 5**: Add caching and performance hardening
+5. **Milestone 5**: Performance hardening with concurrency limits and payload controls
 6. **Milestone 6**: Production security and monitoring
 
 ---
@@ -321,7 +320,7 @@ Once the POC is validated, proceed with the implementation plan milestones:
 | Apps Script Project | https://script.google.com/d/YOUR_PROJECT_ID |
 | Deployment ID | `AKfycbw...` |
 | Connector URL | `https://datastudio.google.com/datasources/create?connectorId=YOUR_DEPLOYMENT_ID` |
-| API Base URL | `https://your-api.com` |
+| Dashboard Looker Endpoint | `https://simpleanalytics.com/api/looker/query` |
 | Test Hostname | `example.com` |
 
 ---

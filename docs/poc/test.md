@@ -6,11 +6,11 @@
 
 ```bash
 # Replace with your actual values
-API_URL="https://your-api.example.com"
+LOOKER_ENDPOINT="https://simpleanalytics.com/api/looker/query"
 API_KEY="sa_api_key_xxx"
 HOSTNAME="example.com"
 
-curl "${API_URL}/api/looker/query?hostname=${HOSTNAME}&start=2024-01-01&end=2024-01-31&timezone=Etc/UTC" \
+curl "${LOOKER_ENDPOINT}?hostname=${HOSTNAME}&start=2024-01-01&end=2024-01-31&timezone=Etc/UTC" \
   -H "Api-Key: ${API_KEY}"
 ```
 
@@ -44,8 +44,8 @@ curl "${API_URL}/api/looker/query?hostname=${HOSTNAME}&start=2024-01-01&end=2024
 
 1. Go to https://script.google.com
 2. Create new project, name it "ES API Connector POC"
-3. Replace `Code.gs` contents with `looker-connector/Code.gs`
-4. Create `appsscript.json` (View > Show manifest file) with `looker-connector/appsscript.json`
+3. Replace `Code.gs` contents with `v2/Code.gs`
+4. Create `appsscript.json` (View > Show manifest file) with `v2/appscript.json`
 
 ### 2.2 Deploy connector
 
@@ -69,11 +69,12 @@ curl "${API_URL}/api/looker/query?hostname=${HOSTNAME}&start=2024-01-01&end=2024
 
 1. Select connector
 2. Fill config:
-   - **API Base URL**: `https://your-api.example.com`
    - **Website Hostname**: `example.com`
    - **API Key**: `sa_api_key_xxx`
    - **Timezone**: Select appropriate timezone
 3. Click Connect
+
+The connector endpoint should be hardcoded to the dashboard proxy and not entered by the user.
 
 **Verify:**
 
@@ -140,24 +141,19 @@ After POC validation, proceed with:
   - Sorting and limits
 - Update connector to build POST payload from Looker request
 
-### 3. Add more dimensions/metrics
+### 3. Add a `v2` field catalog and more dimensions/metrics
 
+- Define one `v2` catalog for schema metadata, request field ids, ES aggregation strategy, and serializers
 - Dimensions: `path`, `referrer_hostname`, `country_code`, `device_type`, `browser_name`, `os_name`, `utm_source`, `utm_medium`, `utm_campaign`
 - Metrics: `unique_visitors` (cardinality), `avg_duration`, `avg_scroll`
 
-### 4. Implement caching
-
-- Cache key: normalized request payload hash
-- TTL: 30-60 seconds for interactive use
-- Storage: in-memory LRU or Redis
-
-### 5. Add filters support
+### 4. Add filters support
 
 - Parse `request.dimensionsFilters` in connector
 - Translate to API filter payload
 - Support: `EQUALS`, `IN`, `CONTAINS`
 
-### 6. Production hardening
+### 5. Production hardening
 
 - Rate limiting per API key
 - Request logging with timing
