@@ -14,6 +14,7 @@ Ship a production-ready Looker Studio connector that supports the main self-serv
 
 - scorecards
 - time series charts
+- interval-aware date histograms for hour, day, week, month, and year
 - breakdown charts
 - tables
 - date range controls
@@ -53,6 +54,7 @@ The connector should normalize the useful parts of `getData(request)` into a sta
 
 - `fields`: selected dimensions and metrics
 - `dateRange`: start and end dates
+- normalized date histogram `interval` when a date dimension is selected
 - `configParams`: hostname, API key, timezone
 - `dimensionsFilters`: filter controls and chart filters
 - `orderBys`: requested sorting
@@ -63,7 +65,7 @@ The connector should normalize the useful parts of `getData(request)` into a sta
 - zero dimensions + one or more metrics for scorecards
 - one dimension + one or more metrics for common charts
 - two or more dimensions for tables and grouped breakdowns
-- date dimension as a special histogram dimension
+- date dimension as a special histogram dimension with `hour`, `day`, `week`, `month`, or `year` interval support
 - filter controls applied server-side
 - chart-level sort and row limits applied server-side
 
@@ -90,6 +92,8 @@ We do not need backwards compatibility for `v2` at this stage. It is fine to rep
 
 ### Request shape
 
+`interval` is optional when `dimensions` contains the normalized `date` dimension. If it is omitted, the system should default to `day`. It must be omitted otherwise.
+
 ```json
 {
   "hostname": "example.com",
@@ -98,6 +102,7 @@ We do not need backwards compatibility for `v2` at this stage. It is fine to rep
     "start": "2026-01-01",
     "end": "2026-01-31"
   },
+  "interval": "month",
   "dimensions": ["date", "country_code"],
   "metrics": ["pageviews", "unique_visitors"],
   "filters": [
@@ -129,7 +134,7 @@ We do not need backwards compatibility for `v2` at this stage. It is fine to rep
   ],
   "rows": [
     {
-      "date": "20260101",
+      "date": "202601",
       "country_code": "NL",
       "pageviews": 123,
       "unique_visitors": 98
@@ -161,9 +166,106 @@ Each field entry should define:
 - whether the field is safe for grouping
 - whether the field is high-cardinality and should stay hidden or guarded
 
+For date dimensions, the catalog should also define:
+
+- connector-facing field id
+- normalized upstream field id (`date`)
+- fixed interval (`hour`, `day`, `week`, `month`, `year`)
+- Looker semantic type
+- response serializer and validator
+
+### Recommended date field catalog entries
+
+These should be the first concrete date entries added to the `v2` catalog.
+
+#### `date_hour`
+
+- connector field id: `date_hour`
+- label: `Date Hour`
+- concept type: `DIMENSION`
+- Looker semantic type: `YEAR_MONTH_DAY_HOUR`
+- normalized upstream dimension: `date`
+- fixed interval: `hour`
+- output format: `YYYYMMDDHH`
+- valid for:
+  - time series
+  - tables
+  - grouped breakdowns with one additional low-cardinality dimension
+
+#### `date_day`
+
+- connector field id: `date_day`
+- label: `Date Day`
+- concept type: `DIMENSION`
+- Looker semantic type: `YEAR_MONTH_DAY`
+- normalized upstream dimension: `date`
+- fixed interval: `day`
+- output format: `YYYYMMDD`
+- valid for:
+  - time series
+  - tables
+  - grouped breakdowns
+
+#### `date_week`
+
+- connector field id: `date_week`
+- label: `Date Week`
+- concept type: `DIMENSION`
+- Looker semantic type: `YEAR_WEEK`
+- normalized upstream dimension: `date`
+- fixed interval: `week`
+- output format: `YYYYWW`
+- valid for:
+  - time series
+  - tables
+  - grouped breakdowns
+
+#### `date_month`
+
+- connector field id: `date_month`
+- label: `Date Month`
+- concept type: `DIMENSION`
+- Looker semantic type: `YEAR_MONTH`
+- normalized upstream dimension: `date`
+- fixed interval: `month`
+- output format: `YYYYMM`
+- valid for:
+  - time series
+  - tables
+  - grouped breakdowns
+
+#### `date_year`
+
+- connector field id: `date_year`
+- label: `Date Year`
+- concept type: `DIMENSION`
+- Looker semantic type: `YEAR`
+- normalized upstream dimension: `date`
+- fixed interval: `year`
+- output format: `YYYY`
+- valid for:
+  - time series
+  - tables
+  - grouped breakdowns
+
+### Date field implementation rules
+
+- only one date interval field may be requested in a single query
+- if any `date_*` field is selected, the connector must normalize it to:
+  - `dimensions: ["date"]`
+  - `interval: <mapped interval>`
+- if the normalized `date` dimension is sent without an explicit interval, the dashboard and elasticsearch-api should treat it as `day`
+- the dashboard and elasticsearch-api should never need separate business logic per connector date field id; that distinction belongs in the connector catalog/translator
+- sorting by date should use ascending order by default unless Looker explicitly asks otherwise
+- `date_hour` should be guarded in practice by reasonable date-range expectations to avoid accidental bucket explosion
+
 ### Initial dimension set
 
-- `date`
+- `date_hour`
+- `date_day`
+- `date_week`
+- `date_month`
+- `date_year`
 - `path`
 - `referrer_hostname`
 - `country_code`
@@ -196,13 +298,19 @@ Each field entry should define:
 
 - Replace the POC-only field handling with a catalog-driven schema builder.
 - Expose dimensions and metrics from the catalog rather than hardcoded shape checks.
-- Ensure date is emitted as `YEAR_MONTH_DAY`.
+- Expose interval-specific date dimensions with the correct Looker semantic types:
+  - `date_hour` -> `YEAR_MONTH_DAY_HOUR`
+  - `date_day` -> `YEAR_MONTH_DAY`
+  - `date_week` -> `YEAR_WEEK`
+  - `date_month` -> `YEAR_MONTH`
+  - `date_year` -> `YEAR`
 
 ### 2. Request translation
 
 - Add a request translator that reads the Looker `getData(request)` object.
 - Split selected fields into `dimensions[]` and `metrics[]`.
-- Normalize `dateRange`, `rowLimit`, `orderBys`, and `dimensionsFilters`.
+- Normalize `dateRange`, `interval`, `rowLimit`, `orderBys`, and `dimensionsFilters`.
+- Map interval-specific date fields like `date_month` to a normalized upstream request using `dimensions: ["date"]` plus `interval: "month"`.
 - Produce one stable POST payload for the dashboard proxy.
 
 ### 3. Filter extraction
@@ -237,7 +345,7 @@ Each field entry should define:
 - Move from POC query params to a POST body.
 - Validate the full payload with Zod.
 - Validate timezone values.
-- Validate dimensions, metrics, filters, order clauses, and limits against an allowlist.
+- Validate dimensions, metrics, interval, filters, order clauses, and limits against an allowlist.
 
 ### 2. Authentication and tenancy
 
@@ -248,6 +356,8 @@ Each field entry should define:
 ### 3. Request normalization
 
 - Normalize missing defaults before proxying upstream.
+- Normalize supported intervals to one of `hour`, `day`, `week`, `month`, or `year`.
+- Default `interval` to `day` when the normalized `date` dimension is present and no interval is supplied.
 - Enforce max dimensions, max metrics, and max row limit at the dashboard layer.
 - Remove unsupported or dangerous fields before forwarding.
 
@@ -270,7 +380,7 @@ Each field entry should define:
 Build a real planner behind `/api/looker/query` that selects one of these strategies:
 
 - `scorecard`: no dimensions
-- `date_histogram`: dimension is `date`
+- `date_histogram`: dimension is `date`, with interval-aware histogram planning
 - `terms`: one non-date dimension
 - `composite`: two or more dimensions
 
@@ -308,6 +418,24 @@ Translate normalized filters into Elasticsearch `bool.filter` clauses.
 - Support sort by metric desc/asc for terms/composite outputs.
 - Support date ascending by default for histograms.
 - Reject unsupported sort combinations with a `400`.
+
+### 4.5. Interval handling
+
+- support these date histogram intervals:
+  - `hour`
+  - `day`
+  - `week`
+  - `month`
+  - `year`
+- keep interval support limited to requests that include the normalized `date` dimension
+- default to `day` when `interval` is omitted on a date request
+- reject `interval` on non-date requests with a `400`
+- format date keys to match the requested interval:
+  - `hour` -> `YYYYMMDDHH`
+  - `day` -> `YYYYMMDD`
+  - `week` -> `YYYYWW`
+  - `month` -> `YYYYMM`
+  - `year` -> `YYYY`
 
 ### 5. Limits and guardrails
 
@@ -373,7 +501,7 @@ Tables are where the implementation stops being “chart-specific” and becomes
 
 ### Example supported requests
 
-- `date + country_code + pageviews`
+- `date_month + country_code + pageviews`
 - `path + device_type + unique_visitors`
 - `country_code + browser_name + avg_duration`
 
@@ -389,11 +517,15 @@ The production connector should explicitly support these report-building cases:
 
 - scorecard: `pageviews`
 - scorecard: `unique_visitors`
-- time series: `date + pageviews`
+- time series: `date_day + pageviews`
+- time series: `date_week + pageviews`
+- time series: `date_month + pageviews`
+- time series: `date_year + pageviews`
+- time series: `date_hour + pageviews` where the selected date range makes hourly buckets reasonable
 - bar chart: `country_code + pageviews`
 - bar chart: `device_type + unique_visitors`
 - table: `path + pageviews`
-- table: `date + country_code + pageviews`
+- table: `date_day + country_code + pageviews`
 - table sorted by metric descending
 - report date control
 - drop-down filter controls
@@ -405,6 +537,7 @@ The production connector should explicitly support these report-building cases:
 - reuse the existing stable visitor or session identifier used in product analytics for `unique_visitors`
 - do not expose `unique_pageviews` in the first full implementation
 - hard limits are `3` dimensions, `5` metrics, and `1000` rows
+- supported date intervals are `hour`, `day`, `week`, `month`, and `year`
 - `CONTAINS` is allowed only for `path`, `referrer_hostname`, `utm_source`, `utm_medium`, and `utm_campaign`
 - expose only `referrer_hostname` initially, not additional referrer fields
 
@@ -412,6 +545,7 @@ The production connector should explicitly support these report-building cases:
 
 Each phase has its own test document with curl examples and a clear definition of done:
 
+- `docs/implementation/phase-0-tests.md`
 - `docs/implementation/phase-1-tests.md`
 - `docs/implementation/phase-2-tests.md`
 - `docs/implementation/phase-3-tests.md`
@@ -423,12 +557,13 @@ Each phase has its own test document with curl examples and a clear definition o
 - introduce the shared field catalog
 - move connector and proxy to a stable request translator
 - move dashboard and elasticsearch-api to a POST contract
-- keep support limited to scorecard, date histogram, and single terms aggregation
+- keep support limited to scorecard, interval-aware date histogram, and single terms aggregation
 
 **Exit criteria**
 
 - POC charts still work through the new contract
 - scorecards work
+- all five supported date histogram intervals work end-to-end
 - a new metric can be added catalog-first instead of endpoint-first
 
 ### Phase 2 — Expand the field surface
@@ -477,6 +612,7 @@ Each phase has its own test document with curl examples and a clear definition o
 ### Connector tests
 
 - validate request translation from representative Looker requests
+- validate interval mapping from `date_hour`, `date_day`, `date_week`, `date_month`, and `date_year` into the normalized API payload
 - validate schema output for dimensions and metrics
 - validate row serialization for dates, strings, and numbers
 
@@ -493,7 +629,7 @@ Each phase has its own test document with curl examples and a clear definition o
 ### Elasticsearch API tests
 
 - scorecard fixture
-- timeseries fixture
+- timeseries fixture for `hour`, `day`, `week`, `month`, and `year`
 - top-N fixture
 - filtered fixture
 - multi-dimension fixture

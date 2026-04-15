@@ -11,6 +11,7 @@ Phase 4 is done when two- and three-dimension grouped requests work, stay flat i
 - Phase 3 is complete
 - composite aggregation planning exists in elasticsearch-api
 - at least `date`, `country_code`, `device_type`, and `path` are groupable
+- interval-aware histograms already work from Phase 1
 
 ## Test 1 — Two dimensions: date + country
 
@@ -22,6 +23,7 @@ curl -s -X POST "http://localhost:3000/api/looker/query" \
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
     "dateRange": { "start": "2026-01-10", "end": "2026-02-17" },
+    "interval": "month",
     "dimensions": ["date", "country_code"],
     "metrics": ["pageviews"],
     "filters": [],
@@ -35,7 +37,7 @@ Expected output:
 - HTTP `200`
 - `.schema` contains `date`, `country_code`, `pageviews`
 - every row has all three fields
-- `date` matches `YYYYMMDD`
+- `date` matches `YYYYMM` for `interval: month`
 - `pageviews` is numeric
 
 ## Test 2 — Two dimensions: path + device type
@@ -72,6 +74,7 @@ curl -s -X POST "http://localhost:3000/api/looker/query" \
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
     "dateRange": { "start": "2026-01-10", "end": "2026-02-17" },
+    "interval": "day",
     "dimensions": ["date", "country_code", "device_type"],
     "metrics": ["pageviews"],
     "filters": [],
@@ -92,7 +95,7 @@ Useful check:
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
   -H "Api-Key: YOUR_API_KEY" \
-  --data '{"hostname":"seed.com","timezone":"Etc/UTC","dateRange":{"start":"2026-01-10","end":"2026-02-17"},"dimensions":["date","country_code","device_type"],"metrics":["pageviews"],"filters":[],"orderBy":[{"field":"pageviews","direction":"DESC"}],"limit":100}' \
+  --data '{"hostname":"seed.com","timezone":"Etc/UTC","dateRange":{"start":"2026-01-10","end":"2026-02-17"},"interval":"day","dimensions":["date","country_code","device_type"],"metrics":["pageviews"],"filters":[],"orderBy":[{"field":"pageviews","direction":"DESC"}],"limit":100}' \
   | jq -e 'has("rows") and (.rows | type == "array") and (.. | objects | has("buckets") | not)'
 ```
 
@@ -106,6 +109,7 @@ curl -i -s -X POST "http://localhost:3000/api/looker/query" \
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
     "dateRange": { "start": "2026-01-10", "end": "2026-02-17" },
+    "interval": "day",
     "dimensions": ["date", "country_code", "device_type", "path"],
     "metrics": ["pageviews"],
     "filters": [],
@@ -122,7 +126,7 @@ Expected output:
 ## Test 5 — Dashboard and ES API parity
 
 ```bash
-BODY='{"hostname":"seed.com","timezone":"Etc/UTC","dateRange":{"start":"2026-01-10","end":"2026-02-17"},"dimensions":["date","country_code"],"metrics":["pageviews"],"filters":[],"orderBy":[{"field":"date","direction":"ASC"}],"limit":100}'
+BODY='{"hostname":"seed.com","timezone":"Etc/UTC","dateRange":{"start":"2026-01-10","end":"2026-02-17"},"interval":"month","dimensions":["date","country_code"],"metrics":["pageviews"],"filters":[],"orderBy":[{"field":"date","direction":"ASC"}],"limit":100}'
 
 curl -s -X POST "http://localhost:3000/api/looker/query" -H "Content-Type: application/json" -H "Api-Key: YOUR_API_KEY" --data "$BODY" > /tmp/phase4-dashboard.json
 curl -s -X POST "http://localhost:5602/api/looker/query" -H "Content-Type: application/json" --data "$BODY" > /tmp/phase4-es.json

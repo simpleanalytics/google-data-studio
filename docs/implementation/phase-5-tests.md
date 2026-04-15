@@ -93,6 +93,7 @@ curl -s -X POST "http://localhost:3000/api/looker/query" \
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
     "dateRange": { "start": "2026-01-10", "end": "2026-02-17" },
+    "interval": "week",
     "dimensions": ["date"],
     "metrics": ["pageviews", "unique_visitors"],
     "filters": [
@@ -107,6 +108,7 @@ Expected output:
 
 - HTTP `200`
 - `.rows` is non-empty
+- every `date` matches `YYYYWW`
 - both metrics are numeric on every row
 
 ## Test 5 — Replay and latency sanity check
@@ -120,7 +122,7 @@ for i in $(seq 1 20); do
   curl -s -o /dev/null -w "%{http_code} %{time_total}\n" -X POST "http://localhost:3000/api/looker/query" \
     -H "Content-Type: application/json" \
     -H "Api-Key: YOUR_API_KEY" \
-    --data '{"hostname":"seed.com","timezone":"Etc/UTC","dateRange":{"start":"2026-01-10","end":"2026-02-17"},"dimensions":["date"],"metrics":["pageviews"],"filters":[],"orderBy":[],"limit":100}'
+    --data '{"hostname":"seed.com","timezone":"Etc/UTC","dateRange":{"start":"2026-01-10","end":"2026-02-17"},"interval":"day","dimensions":["date"],"metrics":["pageviews"],"filters":[],"orderBy":[],"limit":100}'
 done
 ```
 

@@ -96,6 +96,7 @@ That next phase includes:
 
 - replacing the GET POC contract with the real POST contract
 - expanding the field catalog to the full supported dimension and metric set
+- adding interval-aware date histogram support for `hour`, `day`, `week`, `month`, and `year`
 - implementing filter pushdown
 - implementing scorecards and additional metrics
 - implementing multi-dimension tables via composite aggregations

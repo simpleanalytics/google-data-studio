@@ -1,6 +1,6 @@
 # Phase 2 Tests
 
-This document defines done for Phase 2: expanding the field surface beyond the POC while keeping query planning limited to scorecards, date histograms, and single-dimension breakdowns.
+This document defines done for Phase 2: expanding the field surface beyond the POC while keeping query planning limited to scorecards, interval-aware date histograms, and single-dimension breakdowns.
 
 ## Goal
 
@@ -9,7 +9,7 @@ Phase 2 is done when the curated field list is exposed consistently and the firs
 ## Preconditions
 
 - Phase 1 is complete
-- the catalog includes at least these dimensions: `date`, `path`, `country_code`, `device_type`
+- the catalog includes at least these dimensions: `date_hour`, `date_day`, `date_week`, `date_month`, `date_year`, `path`, `country_code`, `device_type`
 - the catalog includes at least these metrics: `pageviews`, `unique_visitors`, `avg_duration`, `avg_scroll`
 
 ## Test 1 — Country breakdown
@@ -89,6 +89,7 @@ curl -s -X POST "http://localhost:3000/api/looker/query" \
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
     "dateRange": { "start": "2026-01-10", "end": "2026-02-17" },
+    "interval": "month",
     "dimensions": ["date"],
     "metrics": ["pageviews", "unique_visitors", "avg_duration"],
     "filters": [],
@@ -102,10 +103,35 @@ Expected output:
 - HTTP `200`
 - `.schema` contains `date`, `pageviews`, `unique_visitors`, `avg_duration`
 - each row has all four fields
-- `date` matches `YYYYMMDD`
+- `date` matches `YYYYMM` for `interval: month`
 - all metric fields are numeric
 
-## Test 4 — Scorecard with non-POC metric
+## Test 4 — Hourly histogram shape
+
+```bash
+curl -s -X POST "http://localhost:3000/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: YOUR_API_KEY" \
+  --data '{
+    "hostname": "seed.com",
+    "timezone": "Etc/UTC",
+    "dateRange": { "start": "2026-02-17", "end": "2026-02-17" },
+    "interval": "hour",
+    "dimensions": ["date"],
+    "metrics": ["pageviews", "unique_visitors"],
+    "filters": [],
+    "orderBy": [],
+    "limit": 100
+  }' | jq
+```
+
+Expected output:
+
+- HTTP `200`
+- every row has `date` matching `YYYYMMDDHH`
+- every metric field is numeric
+
+## Test 5 — Scorecard with non-POC metric
 
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
@@ -130,7 +156,7 @@ Expected output:
 - `.rows | length == 1`
 - `.rows[0].avg_scroll` is a number
 
-## Test 5 — Unknown metric rejection
+## Test 6 — Unknown metric rejection
 
 ```bash
 curl -i -s -X POST "http://localhost:3000/api/looker/query" \
@@ -155,4 +181,4 @@ Expected output:
 
 ## Definition Of Done
 
-Phase 2 is done when all five tests pass and the connector schema in Looker Studio shows the new dimensions as dimensions and the new metrics as metrics.
+Phase 2 is done when all six tests pass and the connector schema in Looker Studio shows the interval-specific date dimensions with the correct semantic types and the new metrics as metrics.

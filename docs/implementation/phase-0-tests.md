@@ -2,6 +2,8 @@
 
 This document covers the current POC smoke tests before the full POST-based implementation starts.
 
+Current limitation: Phase 0 only supports the day-level timeseries shape. Explicit interval support for `hour`, `week`, `month`, and `year` starts in the later implementation phases.
+
 ## Goal
 
 Phase 0 is done when:
