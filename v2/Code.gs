@@ -1,48 +1,47 @@
 /**
- * Looker Studio Community Connector - POC
+ * Looker Studio Community Connector - Phase 1
  * Connects to the dashboard proxy endpoint.
- * Supports pageviews per day and top paths by pageviews.
+ * Supports pageviews scorecards, interval-aware date histograms, and top paths.
  */
 
 const LOOKER_ENDPOINT = 'https://simpleanalytics.com/api/looker/query';
 const DEFAULT_TIMEZONE = 'Etc/UTC';
-const DEFAULT_TOP_PATHS_LIMIT = 20;
-const QUERY_SHAPES = {
-  TIMESERIES: 'timeseries',
-  TOP_PATHS: 'top_paths'
+const DEFAULT_ROW_LIMIT = 1000;
+const DEFAULT_TERMS_LIMIT = 20;
+
+const QUERY_TYPES = {
+  SCORECARD: 'scorecard',
+  DATE_HISTOGRAM: 'date_histogram',
+  TERMS: 'terms'
 };
 
 const FIELD_CATALOG = [
-  {
-    name: 'date',
-    label: 'Date',
-    dataType: 'STRING',
-    semantics: {
-      conceptType: 'DIMENSION',
-      semanticType: 'YEAR_MONTH_DAY'
-    },
-    supportedShapes: [QUERY_SHAPES.TIMESERIES]
-  },
+  createDateField('date_hour', 'Date Hour', 'YEAR_MONTH_DAY_HOUR', 'hour', '^\\d{10}$'),
+  createDateField('date_day', 'Date Day', 'YEAR_MONTH_DAY', 'day', '^\\d{8}$'),
+  createDateField('date_week', 'Date Week', 'YEAR_WEEK', 'week', '^\\d{6}$'),
+  createDateField('date_month', 'Date Month', 'YEAR_MONTH', 'month', '^\\d{6}$'),
+  createDateField('date_year', 'Date Year', 'YEAR', 'year', '^\\d{4}$'),
   {
     name: 'path',
+    apiName: 'path',
     label: 'Path',
     dataType: 'STRING',
+    validator: '^.*$',
     semantics: {
       conceptType: 'DIMENSION',
       semanticType: 'TEXT'
-    },
-    supportedShapes: [QUERY_SHAPES.TOP_PATHS]
+    }
   },
   {
     name: 'pageviews',
+    apiName: 'pageviews',
     label: 'Pageviews',
     dataType: 'NUMBER',
     semantics: {
       conceptType: 'METRIC',
       semanticType: 'NUMBER',
       isReaggregatable: true
-    },
-    supportedShapes: [QUERY_SHAPES.TIMESERIES, QUERY_SHAPES.TOP_PATHS]
+    }
   }
 ];
 
@@ -50,6 +49,21 @@ const FIELD_CATALOG_BY_ID = FIELD_CATALOG.reduce(function(catalog, field) {
   catalog[field.name] = field;
   return catalog;
 }, {});
+
+function createDateField(name, label, semanticType, interval, validator) {
+  return {
+    name: name,
+    apiName: 'date',
+    label: label,
+    interval: interval,
+    validator: validator,
+    dataType: 'STRING',
+    semantics: {
+      conceptType: 'DIMENSION',
+      semanticType: semanticType
+    }
+  };
+}
 
 function getAuthType() {
   return { type: 'NONE' };
@@ -101,47 +115,33 @@ function getSchema() {
 
 function getData(request) {
   const requestedFieldIds = getRequestedFieldIds(request);
-  const queryPlan = buildQueryPlan(requestedFieldIds);
   const config = getValidatedConfig(request);
   const dateRange = getValidatedDateRange(request);
-  const url = buildUrl({
-    hostname: config.hostname,
-    startDate: dateRange.startDate,
-    endDate: dateRange.endDate,
-    timezone: config.timezone,
-    shape: queryPlan.shape,
-    limit: queryPlan.limit
-  });
+  const queryPlan = buildQueryPlan(requestedFieldIds, request);
+  const payload = buildRequestPayload(config, dateRange, queryPlan);
 
   Logger.log(
     JSON.stringify({
       message: 'Fetching Looker data',
       endpoint: LOOKER_ENDPOINT,
-      shape: queryPlan.shape,
-      requestedFieldIds: requestedFieldIds,
-      dateRange: dateRange,
+      queryType: queryPlan.queryType,
+      dimensions: payload.dimensions,
+      metrics: payload.metrics,
+      interval: payload.interval || null,
       hostname: config.hostname
     })
   );
 
-  const data = fetchJson(url, config.apiKey);
-  validateResponseRows(data, queryPlan.shape);
+  const data = fetchJson(payload, config.apiKey);
+  validateResponseRows(data, queryPlan);
 
   const rows = data.rows.map(function(row) {
     return {
       values: requestedFieldIds.map(function(fieldId) {
-        return serializeValue(row[fieldId]);
+        return serializeValue(getFieldValue(fieldId, row));
       })
     };
   });
-
-  Logger.log(
-    JSON.stringify({
-      message: 'Returning Looker data',
-      shape: queryPlan.shape,
-      rowCount: rows.length
-    })
-  );
 
   return {
     schema: requestedFieldIds.map(function(fieldId) {
@@ -170,37 +170,6 @@ function getRequestedFieldIds(request) {
   }
 
   return requestedFieldIds;
-}
-
-function buildQueryPlan(requestedFieldIds) {
-  const dimensionIds = requestedFieldIds.filter(function(fieldId) {
-    return FIELD_CATALOG_BY_ID[fieldId].semantics.conceptType === 'DIMENSION';
-  });
-
-  if (dimensionIds.length > 1) {
-    throwUserError('This POC supports only one dimension at a time.');
-  }
-
-  const selectedDimension = dimensionIds[0] || null;
-  const shape = selectedDimension === 'path'
-    ? QUERY_SHAPES.TOP_PATHS
-    : QUERY_SHAPES.TIMESERIES;
-
-  const unsupportedFields = requestedFieldIds.filter(function(fieldId) {
-    return FIELD_CATALOG_BY_ID[fieldId].supportedShapes.indexOf(shape) === -1;
-  });
-
-  if (unsupportedFields.length) {
-    throwUserError(
-      'This POC does not support the selected field combination: ' +
-        unsupportedFields.join(', ')
-    );
-  }
-
-  return {
-    shape: shape,
-    limit: shape === QUERY_SHAPES.TOP_PATHS ? DEFAULT_TOP_PATHS_LIMIT : null
-  };
 }
 
 function getValidatedConfig(request) {
@@ -239,25 +208,133 @@ function getValidatedDateRange(request) {
   };
 }
 
-function buildUrl(options) {
-  const params = [
-    'hostname=' + encodeURIComponent(options.hostname),
-    'start=' + encodeURIComponent(options.startDate),
-    'end=' + encodeURIComponent(options.endDate),
-    'timezone=' + encodeURIComponent(options.timezone),
-    'shape=' + encodeURIComponent(options.shape)
-  ];
+function buildQueryPlan(requestedFieldIds, request) {
+  const requestedFields = requestedFieldIds.map(function(fieldId) {
+    return FIELD_CATALOG_BY_ID[fieldId];
+  });
+  const dimensions = requestedFields.filter(function(field) {
+    return field.semantics.conceptType === 'DIMENSION';
+  });
+  const metrics = requestedFields.filter(function(field) {
+    return field.semantics.conceptType === 'METRIC';
+  });
 
-  if (options.limit) {
-    params.push('limit=' + encodeURIComponent(String(options.limit)));
+  if (metrics.length !== 1 || metrics[0].name !== 'pageviews') {
+    throwUserError('Phase 1 supports exactly one metric: pageviews.');
   }
 
-  return LOOKER_ENDPOINT + '?' + params.join('&');
+  if (dimensions.length > 1) {
+    throwUserError('Phase 1 supports at most one dimension.');
+  }
+
+  const filters = request && request.dimensionsFilters ? request.dimensionsFilters : [];
+  if (filters.length) {
+    throwUserError('Filters are not supported yet in the connector.');
+  }
+
+  const dimension = dimensions[0] || null;
+  const queryType = !dimension
+    ? QUERY_TYPES.SCORECARD
+    : dimension.apiName === 'date'
+      ? QUERY_TYPES.DATE_HISTOGRAM
+      : QUERY_TYPES.TERMS;
+
+  const orderBy = buildOrderBy(request, dimension, queryType);
+  const limit = buildLimit(request, queryType);
+
+  return {
+    queryType: queryType,
+    dimension: dimension,
+    metrics: ['pageviews'],
+    orderBy: orderBy,
+    limit: limit,
+    interval: dimension && dimension.interval ? dimension.interval : null
+  };
 }
 
-function fetchJson(url, apiKey) {
-  const response = UrlFetchApp.fetch(url, {
-    method: 'get',
+function buildOrderBy(request, dimension, queryType) {
+  const orderBys = request && request.orderBys ? request.orderBys : [];
+  if (!orderBys.length) {
+    if (queryType === QUERY_TYPES.DATE_HISTOGRAM) {
+      return [{ field: 'date', direction: 'ASC' }];
+    }
+    if (queryType === QUERY_TYPES.TERMS) {
+      return [{ field: 'pageviews', direction: 'DESC' }];
+    }
+    return [];
+  }
+
+  const firstOrderBy = orderBys[0];
+  const fieldId = getOrderByFieldId(firstOrderBy);
+  const direction = getOrderByDirection(firstOrderBy);
+
+  if (queryType === QUERY_TYPES.DATE_HISTOGRAM) {
+    if (!dimension || fieldId !== dimension.name) {
+      throwUserError('Date charts can only be sorted by the selected date dimension in phase 1.');
+    }
+    return [{ field: 'date', direction: direction }];
+  }
+
+  if (queryType === QUERY_TYPES.TERMS) {
+    if (fieldId !== 'pageviews' || direction !== 'DESC') {
+      throwUserError('Top path charts can only be sorted by pageviews descending in phase 1.');
+    }
+    return [{ field: 'pageviews', direction: 'DESC' }];
+  }
+
+  if (fieldId) {
+    throwUserError('Scorecards do not support sorting in phase 1.');
+  }
+
+  return [];
+}
+
+function buildLimit(request, queryType) {
+  const rawLimit = request && request.rowLimit ? Number(request.rowLimit) : null;
+  const defaultLimit = queryType === QUERY_TYPES.TERMS ? DEFAULT_TERMS_LIMIT : DEFAULT_ROW_LIMIT;
+  const limit = rawLimit && rawLimit > 0 ? rawLimit : defaultLimit;
+
+  return Math.min(limit, DEFAULT_ROW_LIMIT);
+}
+
+function getOrderByFieldId(orderBy) {
+  if (!orderBy) return '';
+  if (orderBy.field && orderBy.field.name) return orderBy.field.name;
+  if (orderBy.fieldName) return orderBy.fieldName;
+  if (orderBy.name) return orderBy.name;
+  return '';
+}
+
+function getOrderByDirection(orderBy) {
+  const rawDirection = orderBy && (orderBy.sortOrder || orderBy.direction || orderBy.orderType);
+  const normalized = normalizeText(rawDirection).toUpperCase();
+
+  if (normalized === 'DESCENDING' || normalized === 'DESC') return 'DESC';
+  return 'ASC';
+}
+
+function buildRequestPayload(config, dateRange, queryPlan) {
+  return cleanObject({
+    hostname: config.hostname,
+    timezone: config.timezone,
+    dateRange: {
+      start: dateRange.startDate,
+      end: dateRange.endDate
+    },
+    interval: queryPlan.interval || undefined,
+    dimensions: queryPlan.dimension ? [queryPlan.dimension.apiName] : [],
+    metrics: queryPlan.metrics,
+    filters: [],
+    orderBy: queryPlan.orderBy,
+    limit: queryPlan.limit
+  });
+}
+
+function fetchJson(payload, apiKey) {
+  const response = UrlFetchApp.fetch(LOOKER_ENDPOINT, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
     headers: {
       'Api-Key': apiKey,
       'Content-Type': 'application/json'
@@ -293,22 +370,25 @@ function fetchJson(url, apiKey) {
   return parsedResponse;
 }
 
-function validateResponseRows(data, shape) {
+function validateResponseRows(data, queryPlan) {
   if (!data || !Array.isArray(data.rows)) {
     throwUserError('The API response did not include a valid rows array.');
   }
 
+  if (queryPlan.queryType === QUERY_TYPES.SCORECARD) {
+    if (data.rows.length !== 1 || typeof data.rows[0].pageviews !== 'number') {
+      throwUserError('The scorecard response format was not valid.');
+    }
+    return;
+  }
+
   const invalidRow = data.rows.find(function(row) {
-    if (!row || typeof row !== 'object') {
+    if (!row || typeof row !== 'object' || typeof row.pageviews !== 'number') {
       return true;
     }
 
-    if (typeof row.pageviews !== 'number') {
-      return true;
-    }
-
-    if (shape === QUERY_SHAPES.TIMESERIES) {
-      return !/^\d{8}$/.test(String(row.date || ''));
+    if (queryPlan.queryType === QUERY_TYPES.DATE_HISTOGRAM) {
+      return !new RegExp(queryPlan.dimension.validator).test(String(row.date || ''));
     }
 
     return typeof row.path !== 'string' && row.path !== null;
@@ -317,6 +397,11 @@ function validateResponseRows(data, shape) {
   if (invalidRow) {
     throwUserError('The API response format was not valid for this chart.');
   }
+}
+
+function getFieldValue(fieldId, row) {
+  const field = FIELD_CATALOG_BY_ID[fieldId];
+  return row[field.apiName];
 }
 
 function serializeValue(value) {
@@ -337,6 +422,15 @@ function normalizeHostname(hostname) {
     .replace(/^([^/]+)(.*)$/, '$1');
 
   return normalized;
+}
+
+function cleanObject(object) {
+  Object.keys(object).forEach(function(key) {
+    if (object[key] === undefined || object[key] === null || object[key] === '') {
+      delete object[key];
+    }
+  });
+  return object;
 }
 
 function toSchemaField(field) {
