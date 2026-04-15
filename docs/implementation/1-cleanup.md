@@ -58,7 +58,7 @@ Implemented:
 
 Still to do:
 
-- move from the current GET-based POC contract to the final POST-based contract
+- move from the current POC contract to the final POST-based contract
 - standardize the full production request and response contract across both layers
 - add the full allowlist-based validation for dimensions, metrics, filters, sort, and limits
 
@@ -104,4 +104,4 @@ That next phase includes:
 
 ## Recommended Next Step
 
-Follow `docs/implementation/2-full-implementation.md` and the phase test docs in `docs/implementation/phase-0-tests.md` through `docs/implementation/phase-5-tests.md`.
+Follow `docs/implementation/2-full-implementation.md` and the phase test docs in `docs/implementation/phase-1-tests.md` through `docs/implementation/phase-5-tests.md`.
