@@ -1,13 +1,15 @@
 /**
- * Looker Studio Community Connector - Phase 1
+ * Looker Studio Community Connector - Phase 2
  * Connects to the dashboard proxy endpoint.
- * Supports pageviews scorecards, interval-aware date histograms, and top paths.
+ * Supports one-dimension scorecards, histograms, and breakdowns with a
+ * curated field catalog.
  */
 
 const LOOKER_ENDPOINT = 'https://simpleanalytics.com/api/looker/query';
 const DEFAULT_TIMEZONE = 'Etc/UTC';
 const DEFAULT_ROW_LIMIT = 1000;
 const DEFAULT_TERMS_LIMIT = 20;
+const MAX_METRICS = 5;
 
 const QUERY_TYPES = {
   SCORECARD: 'scorecard',
@@ -21,28 +23,19 @@ const FIELD_CATALOG = [
   createDateField('date_week', 'Date Week', 'YEAR_WEEK', 'week', '^\\d{6}$'),
   createDateField('date_month', 'Date Month', 'YEAR_MONTH', 'month', '^\\d{6}$'),
   createDateField('date_year', 'Date Year', 'YEAR', 'year', '^\\d{4}$'),
-  {
-    name: 'path',
-    apiName: 'path',
-    label: 'Path',
-    dataType: 'STRING',
-    validator: '^.*$',
-    semantics: {
-      conceptType: 'DIMENSION',
-      semanticType: 'TEXT'
-    }
-  },
-  {
-    name: 'pageviews',
-    apiName: 'pageviews',
-    label: 'Pageviews',
-    dataType: 'NUMBER',
-    semantics: {
-      conceptType: 'METRIC',
-      semanticType: 'NUMBER',
-      isReaggregatable: true
-    }
-  }
+  createDimensionField('path', 'Path'),
+  createDimensionField('referrer_hostname', 'Referrer Hostname'),
+  createDimensionField('country_code', 'Country Code'),
+  createDimensionField('device_type', 'Device Type'),
+  createDimensionField('browser_name', 'Browser Name'),
+  createDimensionField('os_name', 'OS Name'),
+  createDimensionField('utm_source', 'UTM Source'),
+  createDimensionField('utm_medium', 'UTM Medium'),
+  createDimensionField('utm_campaign', 'UTM Campaign'),
+  createMetricField('pageviews', 'Pageviews', true),
+  createMetricField('unique_visitors', 'Unique Visitors'),
+  createMetricField('avg_duration', 'Avg Duration'),
+  createMetricField('avg_scroll', 'Avg Scroll')
 ];
 
 const FIELD_CATALOG_BY_ID = FIELD_CATALOG.reduce(function(catalog, field) {
@@ -62,6 +55,39 @@ function createDateField(name, label, semanticType, interval, validator) {
       conceptType: 'DIMENSION',
       semanticType: semanticType
     }
+  };
+}
+
+function createDimensionField(name, label) {
+  return {
+    name: name,
+    apiName: name,
+    label: label,
+    dataType: 'STRING',
+    validator: '^.*$',
+    semantics: {
+      conceptType: 'DIMENSION',
+      semanticType: 'TEXT'
+    }
+  };
+}
+
+function createMetricField(name, label, isReaggregatable) {
+  const semantics = {
+    conceptType: 'METRIC',
+    semanticType: 'NUMBER'
+  };
+
+  if (isReaggregatable) {
+    semantics.isReaggregatable = true;
+  }
+
+  return {
+    name: name,
+    apiName: name,
+    label: label,
+    dataType: 'NUMBER',
+    semantics: semantics
   };
 }
 
@@ -219,12 +245,16 @@ function buildQueryPlan(requestedFieldIds, request) {
     return field.semantics.conceptType === 'METRIC';
   });
 
-  if (metrics.length !== 1 || metrics[0].name !== 'pageviews') {
-    throwUserError('Phase 1 supports exactly one metric: pageviews.');
+  if (!metrics.length) {
+    throwUserError('Select at least one metric.');
+  }
+
+  if (metrics.length > MAX_METRICS) {
+    throwUserError('Phase 2 supports at most ' + MAX_METRICS + ' metrics.');
   }
 
   if (dimensions.length > 1) {
-    throwUserError('Phase 1 supports at most one dimension.');
+    throwUserError('Phase 2 supports at most one dimension.');
   }
 
   const filters = request && request.dimensionsFilters ? request.dimensionsFilters : [];
@@ -239,29 +269,36 @@ function buildQueryPlan(requestedFieldIds, request) {
       ? QUERY_TYPES.DATE_HISTOGRAM
       : QUERY_TYPES.TERMS;
 
-  const orderBy = buildOrderBy(request, dimension, queryType);
+  const orderBy = buildOrderBy(request, dimension, metrics, queryType);
   const limit = buildLimit(request, queryType);
 
   return {
     queryType: queryType,
     dimension: dimension,
-    metrics: ['pageviews'],
+    metricFields: metrics,
+    metrics: metrics.map(function(field) {
+      return field.apiName;
+    }),
     orderBy: orderBy,
     limit: limit,
     interval: dimension && dimension.interval ? dimension.interval : null
   };
 }
 
-function buildOrderBy(request, dimension, queryType) {
+function buildOrderBy(request, dimension, metrics, queryType) {
   const orderBys = request && request.orderBys ? request.orderBys : [];
   if (!orderBys.length) {
     if (queryType === QUERY_TYPES.DATE_HISTOGRAM) {
       return [{ field: 'date', direction: 'ASC' }];
     }
     if (queryType === QUERY_TYPES.TERMS) {
-      return [{ field: 'pageviews', direction: 'DESC' }];
+      return [{ field: metrics[0].apiName, direction: 'DESC' }];
     }
     return [];
+  }
+
+  if (orderBys.length > 1) {
+    throwUserError('Phase 2 supports at most one sort field.');
   }
 
   const firstOrderBy = orderBys[0];
@@ -270,20 +307,28 @@ function buildOrderBy(request, dimension, queryType) {
 
   if (queryType === QUERY_TYPES.DATE_HISTOGRAM) {
     if (!dimension || fieldId !== dimension.name) {
-      throwUserError('Date charts can only be sorted by the selected date dimension in phase 1.');
+      throwUserError('Date charts can only be sorted by the selected date dimension in phase 2.');
     }
     return [{ field: 'date', direction: direction }];
   }
 
   if (queryType === QUERY_TYPES.TERMS) {
-    if (fieldId !== 'pageviews' || direction !== 'DESC') {
-      throwUserError('Top path charts can only be sorted by pageviews descending in phase 1.');
+    if (dimension && fieldId === dimension.name) {
+      return [{ field: dimension.apiName, direction: direction }];
     }
-    return [{ field: 'pageviews', direction: 'DESC' }];
+
+    const metricField = metrics.find(function(metric) {
+      return metric.name === fieldId;
+    });
+    if (!metricField) {
+      throwUserError('Breakdown charts can only be sorted by the selected dimension or selected metrics in phase 2.');
+    }
+
+    return [{ field: metricField.apiName, direction: direction }];
   }
 
   if (fieldId) {
-    throwUserError('Scorecards do not support sorting in phase 1.');
+    throwUserError('Scorecards do not support sorting.');
   }
 
   return [];
@@ -376,14 +421,14 @@ function validateResponseRows(data, queryPlan) {
   }
 
   if (queryPlan.queryType === QUERY_TYPES.SCORECARD) {
-    if (data.rows.length !== 1 || typeof data.rows[0].pageviews !== 'number') {
+    if (data.rows.length !== 1 || !hasValidMetricValues(data.rows[0], queryPlan.metricFields)) {
       throwUserError('The scorecard response format was not valid.');
     }
     return;
   }
 
   const invalidRow = data.rows.find(function(row) {
-    if (!row || typeof row !== 'object' || typeof row.pageviews !== 'number') {
+    if (!row || typeof row !== 'object' || !hasValidMetricValues(row, queryPlan.metricFields)) {
       return true;
     }
 
@@ -391,12 +436,18 @@ function validateResponseRows(data, queryPlan) {
       return !new RegExp(queryPlan.dimension.validator).test(String(row.date || ''));
     }
 
-    return typeof row.path !== 'string' && row.path !== null;
+    return typeof row[queryPlan.dimension.apiName] !== 'string' && row[queryPlan.dimension.apiName] !== null;
   });
 
   if (invalidRow) {
     throwUserError('The API response format was not valid for this chart.');
   }
+}
+
+function hasValidMetricValues(row, metricFields) {
+  return metricFields.every(function(metricField) {
+    return typeof row[metricField.apiName] === 'number';
+  });
 }
 
 function getFieldValue(fieldId, row) {
