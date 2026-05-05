@@ -1,5 +1,5 @@
 /**
- * Looker Studio Community Connector - Phase 4
+ * Looker Studio Community Connector
  * Connects to the dashboard proxy endpoint.
  * Supports grouped scorecards, histograms, breakdowns, filter pushdown, and
  * multi-dimension tables for a curated field catalog.
@@ -7,10 +7,8 @@
 
 const LOOKER_ENDPOINT = 'https://simpleanalytics.com/api/looker/query';
 const DEFAULT_TIMEZONE = 'Etc/UTC';
-const DEFAULT_ROW_LIMIT = 1000;
-const DEFAULT_TERMS_LIMIT = 20;
-const MAX_METRICS = 5;
-const MAX_DIMENSIONS = 3;
+const MAX_METRICS = 10;
+const MAX_DIMENSIONS = 5;
 
 const QUERY_TYPES = {
   SCORECARD: 'scorecard',
@@ -170,8 +168,12 @@ function getData(request) {
   Logger.log(
     JSON.stringify({
       message: 'Fetching Looker data',
+      fingerprint: buildQueryFingerprint(queryPlan, payload),
       endpoint: LOOKER_ENDPOINT,
       queryType: queryPlan.queryType,
+      dimensionCount: payload.dimensions.length,
+      metricCount: payload.metrics.length,
+      filterCount: payload.filters.length,
       dimensions: payload.dimensions,
       metrics: payload.metrics,
       filters: summarizeFilters(queryPlan.filters),
@@ -272,18 +274,18 @@ function buildQueryPlan(requestedFieldIds, request) {
   }
 
   if (metrics.length > MAX_METRICS) {
-    throwUserError('Phase 4 supports at most ' + MAX_METRICS + ' metrics.');
+    throwUserError('This connector supports at most ' + MAX_METRICS + ' metrics.');
   }
 
   if (dimensions.length > MAX_DIMENSIONS) {
-    throwUserError('Phase 4 supports at most ' + MAX_DIMENSIONS + ' dimensions.');
+    throwUserError('This connector supports at most ' + MAX_DIMENSIONS + ' dimensions.');
   }
 
   const dateDimensions = dimensions.filter(function(field) {
     return field.apiName === 'date';
   });
   if (dateDimensions.length > 1) {
-    throwUserError('Phase 4 supports at most one date dimension.');
+    throwUserError('Select at most one date dimension.');
   }
 
   const filters = normalizeFilters(request);
@@ -297,7 +299,7 @@ function buildQueryPlan(requestedFieldIds, request) {
         : QUERY_TYPES.COMPOSITE;
 
   const orderBy = buildOrderBy(request, dimensions, metrics, queryType);
-  const limit = buildLimit(request, queryType);
+  const limit = buildLimit(request);
   const dateDimension = dateDimensions[0] || null;
 
   return {
@@ -327,7 +329,7 @@ function buildOrderBy(request, dimensions, metrics, queryType) {
   }
 
   if (orderBys.length > 1) {
-    throwUserError('Phase 4 supports at most one sort field.');
+    throwUserError('Select at most one sort field.');
   }
 
   const firstOrderBy = orderBys[0];
@@ -337,7 +339,7 @@ function buildOrderBy(request, dimensions, metrics, queryType) {
 
   if (queryType === QUERY_TYPES.DATE_HISTOGRAM) {
     if (!dimension || fieldId !== dimension.name) {
-      throwUserError('Date charts can only be sorted by the selected date dimension in phase 4.');
+      throwUserError('Date charts can only be sorted by the selected date dimension.');
     }
     return [{ field: 'date', direction: direction }];
   }
@@ -355,7 +357,7 @@ function buildOrderBy(request, dimensions, metrics, queryType) {
       return metric.name === fieldId;
     });
     if (!metricField) {
-      throwUserError('Grouped charts can only be sorted by the selected dimensions or selected metrics in phase 4.');
+      throwUserError('Grouped charts can only be sorted by the selected dimensions or selected metrics.');
     }
 
     return [{ field: metricField.apiName, direction: direction }];
@@ -368,12 +370,18 @@ function buildOrderBy(request, dimensions, metrics, queryType) {
   return [];
 }
 
-function buildLimit(request, queryType) {
+function buildLimit(request) {
   const rawLimit = request && request.rowLimit ? Number(request.rowLimit) : null;
-  const defaultLimit = queryType === QUERY_TYPES.TERMS ? DEFAULT_TERMS_LIMIT : DEFAULT_ROW_LIMIT;
-  const limit = rawLimit && rawLimit > 0 ? rawLimit : defaultLimit;
 
-  return Math.min(limit, DEFAULT_ROW_LIMIT);
+  if (rawLimit === null || rawLimit === 0 || Number.isNaN(rawLimit)) {
+    return null;
+  }
+
+  if (rawLimit < 1) {
+    throwUserError('Row limit must be greater than zero.');
+  }
+
+  return rawLimit;
 }
 
 function getOrderByFieldId(orderBy) {
@@ -522,17 +530,34 @@ function summarizeFilters(filters) {
   });
 }
 
-function fetchJson(payload, apiKey) {
-  const response = UrlFetchApp.fetch(LOOKER_ENDPOINT, {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify(payload),
-    headers: {
-      'Api-Key': apiKey,
-      'Content-Type': 'application/json'
-    },
-    muteHttpExceptions: true
+function buildQueryFingerprint(queryPlan, payload) {
+  return JSON.stringify({
+    queryType: queryPlan.queryType || null,
+    dimensions: payload.dimensions || [],
+    metrics: payload.metrics || [],
+    filters: summarizeFilters(payload.filters || []),
+    interval: payload.interval || null,
+    limit: payload.limit || null
   });
+}
+
+function fetchJson(payload, apiKey) {
+  var response;
+
+  try {
+    response = UrlFetchApp.fetch(LOOKER_ENDPOINT, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      headers: {
+        'Api-Key': apiKey,
+        'Content-Type': 'application/json'
+      },
+      muteHttpExceptions: true
+    });
+  } catch (error) {
+    throwUserError('The API request failed before a response was returned.');
+  }
 
   const responseCode = response.getResponseCode();
   const responseText = response.getContentText();
