@@ -1,8 +1,8 @@
 /**
- * Looker Studio Community Connector - Phase 3
+ * Looker Studio Community Connector - Phase 4
  * Connects to the dashboard proxy endpoint.
- * Supports one-dimension scorecards, histograms, breakdowns, and filter
- * pushdown for a curated field catalog.
+ * Supports grouped scorecards, histograms, breakdowns, filter pushdown, and
+ * multi-dimension tables for a curated field catalog.
  */
 
 const LOOKER_ENDPOINT = 'https://simpleanalytics.com/api/looker/query';
@@ -10,11 +10,13 @@ const DEFAULT_TIMEZONE = 'Etc/UTC';
 const DEFAULT_ROW_LIMIT = 1000;
 const DEFAULT_TERMS_LIMIT = 20;
 const MAX_METRICS = 5;
+const MAX_DIMENSIONS = 3;
 
 const QUERY_TYPES = {
   SCORECARD: 'scorecard',
   DATE_HISTOGRAM: 'date_histogram',
-  TERMS: 'terms'
+  TERMS: 'terms',
+  COMPOSITE: 'composite'
 };
 
 const FILTER_OPERATORS = {
@@ -270,28 +272,37 @@ function buildQueryPlan(requestedFieldIds, request) {
   }
 
   if (metrics.length > MAX_METRICS) {
-    throwUserError('Phase 3 supports at most ' + MAX_METRICS + ' metrics.');
+    throwUserError('Phase 4 supports at most ' + MAX_METRICS + ' metrics.');
   }
 
-  if (dimensions.length > 1) {
-    throwUserError('Phase 3 supports at most one dimension.');
+  if (dimensions.length > MAX_DIMENSIONS) {
+    throwUserError('Phase 4 supports at most ' + MAX_DIMENSIONS + ' dimensions.');
+  }
+
+  const dateDimensions = dimensions.filter(function(field) {
+    return field.apiName === 'date';
+  });
+  if (dateDimensions.length > 1) {
+    throwUserError('Phase 4 supports at most one date dimension.');
   }
 
   const filters = normalizeFilters(request);
 
-  const dimension = dimensions[0] || null;
-  const queryType = !dimension
+  const queryType = !dimensions.length
     ? QUERY_TYPES.SCORECARD
-    : dimension.apiName === 'date'
+    : dimensions.length === 1 && dimensions[0].apiName === 'date'
       ? QUERY_TYPES.DATE_HISTOGRAM
-      : QUERY_TYPES.TERMS;
+      : dimensions.length === 1
+        ? QUERY_TYPES.TERMS
+        : QUERY_TYPES.COMPOSITE;
 
-  const orderBy = buildOrderBy(request, dimension, metrics, queryType);
+  const orderBy = buildOrderBy(request, dimensions, metrics, queryType);
   const limit = buildLimit(request, queryType);
+  const dateDimension = dateDimensions[0] || null;
 
   return {
     queryType: queryType,
-    dimension: dimension,
+    dimensions: dimensions,
     metricFields: metrics,
     metrics: metrics.map(function(field) {
       return field.apiName;
@@ -299,47 +310,52 @@ function buildQueryPlan(requestedFieldIds, request) {
     filters: filters,
     orderBy: orderBy,
     limit: limit,
-    interval: dimension && dimension.interval ? dimension.interval : null
+    interval: dateDimension && dateDimension.interval ? dateDimension.interval : null
   };
 }
 
-function buildOrderBy(request, dimension, metrics, queryType) {
+function buildOrderBy(request, dimensions, metrics, queryType) {
   const orderBys = request && request.orderBys ? request.orderBys : [];
   if (!orderBys.length) {
     if (queryType === QUERY_TYPES.DATE_HISTOGRAM) {
       return [{ field: 'date', direction: 'ASC' }];
     }
-    if (queryType === QUERY_TYPES.TERMS) {
+    if (queryType === QUERY_TYPES.TERMS || queryType === QUERY_TYPES.COMPOSITE) {
       return [{ field: metrics[0].apiName, direction: 'DESC' }];
     }
     return [];
   }
 
   if (orderBys.length > 1) {
-    throwUserError('Phase 3 supports at most one sort field.');
+    throwUserError('Phase 4 supports at most one sort field.');
   }
 
   const firstOrderBy = orderBys[0];
   const fieldId = getOrderByFieldId(firstOrderBy);
   const direction = getOrderByDirection(firstOrderBy);
+  const dimension = dimensions[0] || null;
 
   if (queryType === QUERY_TYPES.DATE_HISTOGRAM) {
     if (!dimension || fieldId !== dimension.name) {
-      throwUserError('Date charts can only be sorted by the selected date dimension in phase 2.');
+      throwUserError('Date charts can only be sorted by the selected date dimension in phase 4.');
     }
     return [{ field: 'date', direction: direction }];
   }
 
-  if (queryType === QUERY_TYPES.TERMS) {
-    if (dimension && fieldId === dimension.name) {
-      return [{ field: dimension.apiName, direction: direction }];
+  if (queryType === QUERY_TYPES.TERMS || queryType === QUERY_TYPES.COMPOSITE) {
+    var matchedDimension = dimensions.find(function(selectedDimension) {
+      return selectedDimension.name === fieldId;
+    });
+
+    if (matchedDimension) {
+      return [{ field: matchedDimension.apiName, direction: direction }];
     }
 
     const metricField = metrics.find(function(metric) {
       return metric.name === fieldId;
     });
     if (!metricField) {
-      throwUserError('Breakdown charts can only be sorted by the selected dimension or selected metrics in phase 3.');
+      throwUserError('Grouped charts can only be sorted by the selected dimensions or selected metrics in phase 4.');
     }
 
     return [{ field: metricField.apiName, direction: direction }];
@@ -385,7 +401,9 @@ function buildRequestPayload(config, dateRange, queryPlan) {
       end: dateRange.endDate
     },
     interval: queryPlan.interval || undefined,
-    dimensions: queryPlan.dimension ? [queryPlan.dimension.apiName] : [],
+    dimensions: queryPlan.dimensions.map(function(field) {
+      return field.apiName;
+    }),
     metrics: queryPlan.metrics,
     filters: queryPlan.filters,
     orderBy: queryPlan.orderBy,
@@ -562,15 +580,27 @@ function validateResponseRows(data, queryPlan) {
     }
 
     if (queryPlan.queryType === QUERY_TYPES.DATE_HISTOGRAM) {
-      return !new RegExp(queryPlan.dimension.validator).test(String(row.date || ''));
+      return !hasValidDimensionValue(row, queryPlan.dimensions[0]);
     }
 
-    return typeof row[queryPlan.dimension.apiName] !== 'string' && row[queryPlan.dimension.apiName] !== null;
+    return queryPlan.dimensions.some(function(dimension) {
+      return !hasValidDimensionValue(row, dimension);
+    });
   });
 
   if (invalidRow) {
     throwUserError('The API response format was not valid for this chart.');
   }
+}
+
+function hasValidDimensionValue(row, dimension) {
+  var value = row[dimension.apiName];
+
+  if (dimension.apiName === 'date') {
+    return new RegExp(dimension.validator).test(String(value || ''));
+  }
+
+  return typeof value === 'string' || value === null;
 }
 
 function hasValidMetricValues(row, metricFields) {
