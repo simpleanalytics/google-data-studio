@@ -289,22 +289,23 @@ function buildQueryPlan(requestedFieldIds, request) {
   }
 
   const filters = normalizeFilters(request);
+  const dateDimension = dateDimensions[0] || null;
 
   const queryType = !dimensions.length
     ? QUERY_TYPES.SCORECARD
     : dimensions.length === 1 && dimensions[0].apiName === 'date'
       ? QUERY_TYPES.DATE_HISTOGRAM
-      : dimensions.length === 1
+    : dimensions.length === 1
         ? QUERY_TYPES.TERMS
         : QUERY_TYPES.COMPOSITE;
 
   const orderBy = buildOrderBy(request, dimensions, metrics, queryType);
   const limit = buildLimit(request);
-  const dateDimension = dateDimensions[0] || null;
 
   return {
     queryType: queryType,
     dimensions: dimensions,
+    dateDimensions: dateDimensions,
     metricFields: metrics,
     metrics: metrics.map(function(field) {
       return field.apiName;
@@ -409,13 +410,21 @@ function buildRequestPayload(config, dateRange, queryPlan) {
       end: dateRange.endDate
     },
     interval: queryPlan.interval || undefined,
-    dimensions: queryPlan.dimensions.map(function(field) {
-      return field.apiName;
-    }),
+    dimensions: getApiDimensions(queryPlan),
     metrics: queryPlan.metrics,
     filters: queryPlan.filters,
     orderBy: queryPlan.orderBy,
     limit: queryPlan.limit
+  });
+}
+
+function getApiDimensions(queryPlan) {
+  if (queryPlan.queryType === QUERY_TYPES.SCORECARD) {
+    return [];
+  }
+
+  return queryPlan.dimensions.map(function(field) {
+    return field.apiName;
   });
 }
 
@@ -622,10 +631,14 @@ function hasValidDimensionValue(row, dimension) {
   var value = row[dimension.apiName];
 
   if (dimension.apiName === 'date') {
-    return new RegExp(dimension.validator).test(String(value || ''));
+    return hasValidDateResponseValue(value, dimension.validator);
   }
 
   return typeof value === 'string' || value === null;
+}
+
+function hasValidDateResponseValue(value, validator) {
+  return new RegExp(validator).test(String(value || ''));
 }
 
 function hasValidMetricValues(row, metricFields) {
@@ -646,6 +659,7 @@ function serializeValue(value) {
 
   return value;
 }
+
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
