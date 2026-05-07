@@ -62,6 +62,29 @@ const FIELD_CATALOG_BY_ID = FIELD_CATALOG.reduce(function(catalog, field) {
   return catalog;
 }, {});
 
+const FIELD_CATALOG_BY_ALIAS = FIELD_CATALOG.reduce(function(catalog, field) {
+  getFieldAliases(field).forEach(function(alias) {
+    catalog[alias] = field.name;
+  });
+  return catalog;
+}, {});
+
+function getFieldAliases(field) {
+  return [field.name, field.apiName, field.label]
+    .filter(function(value) {
+      return Boolean(value);
+    })
+    .map(normalizeFieldKey);
+}
+
+function normalizeFieldKey(value) {
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
 function createDateField(name, label, semanticType, interval, validator) {
   return {
     name: name,
@@ -437,15 +460,30 @@ function normalizeFilters(request) {
     return [];
   }
 
-  return rawFilters.map(function(rawFilter) {
-    const fieldId = getFilterFieldId(rawFilter);
-    const operator = normalizeFilterOperator(rawFilter);
-    const values = normalizeFilterValues(rawFilter);
-    const allowedOperators = FIELD_FILTER_RULES[fieldId];
+  return rawFilters.reduce(function(filters, rawFilter) {
+    return filters.concat(normalizeSingleFilter(rawFilter));
+  }, []);
+}
+
+function normalizeSingleFilter(rawFilter) {
+  const filterParts = expandRawFilterParts(rawFilter);
+
+  return filterParts.reduce(function(filters, filterPart) {
+    const fieldId = resolveFilterFieldId(filterPart);
+    const operator = normalizeFilterOperator(filterPart);
+    const values = normalizeFilterValues(filterPart);
 
     if (!fieldId || !FIELD_CATALOG_BY_ID[fieldId]) {
-      throwUserError('Unsupported filter field requested.');
+      Logger.log(JSON.stringify({
+        message: 'Skipping unsupported filter field shape',
+        rawFieldIds: getFilterFieldIds(filterPart),
+        resolvedFieldId: fieldId,
+        keys: Object.keys(filterPart || {})
+      }));
+      return filters;
     }
+
+    const allowedOperators = FIELD_FILTER_RULES[fieldId];
 
     if (!allowedOperators) {
       throwUserError('Filtering is not supported for ' + fieldId + '.');
@@ -463,38 +501,163 @@ function normalizeFilters(request) {
       throwUserError(operator + ' filters require exactly one value.');
     }
 
-    return {
+    filters.push({
       field: FIELD_CATALOG_BY_ID[fieldId].apiName,
       operator: operator,
       values: values
-    };
+    });
+
+    return filters;
+  }, []);
+}
+
+function expandRawFilterParts(rawFilter) {
+  if (!rawFilter || typeof rawFilter !== 'object') {
+    return [];
+  }
+
+  if (Array.isArray(rawFilter.clauses) && rawFilter.clauses.length) {
+    return rawFilter.clauses;
+  }
+
+  const fieldIds = getFilterFieldIds(rawFilter);
+  if (fieldIds.length <= 1) {
+    return [rawFilter];
+  }
+
+  const values = normalizeFilterValues(rawFilter);
+
+  return fieldIds.map(function(fieldId, index) {
+    const value = values[index];
+
+    return cleanObject({
+      fieldName: fieldId,
+      operator: rawFilter.operator,
+      operatorType: rawFilter.operatorType,
+      type: rawFilter.type,
+      conditionType: rawFilter.conditionType,
+      operatorName: rawFilter.operatorName,
+      filterType: rawFilter.filterType,
+      condition: rawFilter.condition,
+      values: typeof value !== 'undefined' ? [value] : values
+    });
   });
 }
 
 function getFilterFieldId(filter) {
+  const fieldIds = getFilterFieldIds(filter);
+  return fieldIds.length ? fieldIds[0] : '';
+}
+
+function getFilterFieldIds(filter) {
   if (!filter || typeof filter !== 'object') return '';
-  if (filter.fieldName) return String(filter.fieldName);
-  if (filter.name) return String(filter.name);
-  if (filter.field && filter.field.name) return String(filter.field.name);
-  if (filter.dimension && filter.dimension.name) return String(filter.dimension.name);
-  return '';
+
+  const possibleValues = [];
+
+  pushFilterFieldValues(possibleValues, filter.fieldId);
+  pushFilterFieldValues(possibleValues, filter.id);
+  pushFilterFieldValues(possibleValues, filter.column);
+  pushFilterFieldValues(possibleValues, filter.dimensionId);
+  pushFilterFieldValues(possibleValues, filter.fieldName);
+  pushFilterFieldValues(possibleValues, filter.name);
+  pushFilterFieldValues(possibleValues, filter.fieldNames);
+  pushFilterFieldValues(possibleValues, filter.columns);
+  pushFilterFieldValues(possibleValues, filter.dimensionNames);
+  pushFilterFieldValues(possibleValues, filter.fields);
+  pushFilterFieldValues(possibleValues, filter.dimensions);
+  pushFilterFieldValues(possibleValues, filter.field && filter.field.id);
+  pushFilterFieldValues(possibleValues, filter.field && filter.field.name);
+  pushFilterFieldValues(possibleValues, filter.field && filter.field.label);
+  pushFilterFieldValues(possibleValues, filter.dimension && filter.dimension.id);
+  pushFilterFieldValues(possibleValues, filter.dimension && filter.dimension.name);
+  pushFilterFieldValues(possibleValues, filter.dimension && filter.dimension.label);
+  pushFilterFieldValues(possibleValues, filter.condition && filter.condition.fieldName);
+  pushFilterFieldValues(possibleValues, filter.condition && filter.condition.fieldNames);
+
+  return possibleValues.filter(function(value, index) {
+    return value && possibleValues.indexOf(value) === index;
+  });
+}
+
+function pushFilterFieldValues(values, candidate) {
+  if (Array.isArray(candidate)) {
+    candidate.forEach(function(item) {
+      pushFilterFieldValues(values, item);
+    });
+    return;
+  }
+
+  if (candidate && typeof candidate === 'object') {
+    pushFilterFieldValues(values, candidate.id);
+    pushFilterFieldValues(values, candidate.name);
+    pushFilterFieldValues(values, candidate.label);
+    return;
+  }
+
+  if (typeof candidate !== 'undefined' && candidate !== null && String(candidate).trim()) {
+    values.push(String(candidate));
+  }
+}
+
+function resolveFilterFieldId(filter) {
+  var rawFieldId = getFilterFieldId(filter);
+
+  if (!rawFieldId) {
+    return '';
+  }
+
+  if (FIELD_CATALOG_BY_ID[rawFieldId]) {
+    return rawFieldId;
+  }
+
+  return FIELD_CATALOG_BY_ALIAS[normalizeFieldKey(rawFieldId)] || '';
 }
 
 function normalizeFilterOperator(filter) {
   const valueCount = normalizeFilterValues(filter).length;
   const rawOperator = normalizeText(
-    filter && (filter.operator || filter.operatorType || filter.type || filter.conditionType)
+    filter && (
+      filter.operator ||
+      filter.operatorType ||
+      filter.type ||
+      filter.conditionType ||
+      filter.operatorName ||
+      filter.filterType ||
+      (filter.condition && filter.condition.type)
+    )
   ).toUpperCase();
+
+  if (!rawOperator) {
+    return valueCount > 1 ? FILTER_OPERATORS.IN : FILTER_OPERATORS.EQUALS;
+  }
 
   if (rawOperator === FILTER_OPERATORS.EQUALS) return FILTER_OPERATORS.EQUALS;
   if (rawOperator === FILTER_OPERATORS.IN || rawOperator === 'IN_LIST') return FILTER_OPERATORS.IN;
   if (rawOperator === 'INCLUDE') return valueCount > 1 ? FILTER_OPERATORS.IN : FILTER_OPERATORS.EQUALS;
   if (rawOperator === 'EXCLUDE') return FILTER_OPERATORS.NOT_EQUALS;
+  if (rawOperator === 'SELECTED' || rawOperator === 'SELECT') {
+    return valueCount > 1 ? FILTER_OPERATORS.IN : FILTER_OPERATORS.EQUALS;
+  }
+  if (rawOperator === 'IS' || rawOperator === 'EXACT' || rawOperator === '=') {
+    return valueCount > 1 ? FILTER_OPERATORS.IN : FILTER_OPERATORS.EQUALS;
+  }
+  if (rawOperator === 'NOT_IN' || rawOperator === 'IS_NOT' || rawOperator === '!=') {
+    return FILTER_OPERATORS.NOT_EQUALS;
+  }
   if (rawOperator === FILTER_OPERATORS.NOT_EQUALS) return FILTER_OPERATORS.NOT_EQUALS;
   if (rawOperator === FILTER_OPERATORS.CONTAINS || rawOperator === 'TEXT_CONTAINS') return FILTER_OPERATORS.CONTAINS;
   if (rawOperator.indexOf('NOT') !== -1 && rawOperator.indexOf('EQUAL') !== -1) return FILTER_OPERATORS.NOT_EQUALS;
+  if (rawOperator.indexOf('SELECT') !== -1) return valueCount > 1 ? FILTER_OPERATORS.IN : FILTER_OPERATORS.EQUALS;
+  if (rawOperator.indexOf('IN') !== -1) return FILTER_OPERATORS.IN;
   if (rawOperator.indexOf('CONTAIN') !== -1) return FILTER_OPERATORS.CONTAINS;
   if (rawOperator.indexOf('EQUAL') !== -1) return FILTER_OPERATORS.EQUALS;
+
+  Logger.log(JSON.stringify({
+    message: 'Unsupported filter operator shape',
+    operator: rawOperator,
+    field: getFilterFieldId(filter),
+    keys: Object.keys(filter || {})
+  }));
 
   throwUserError('Unsupported filter operator requested.');
 }
@@ -504,10 +667,31 @@ function normalizeFilterValues(filter) {
 
   if (filter && Array.isArray(filter.values)) {
     rawValues = filter.values;
+  } else if (filter && Array.isArray(filter.selectedValues)) {
+    rawValues = filter.selectedValues;
+  } else if (filter && Array.isArray(filter.includedValues)) {
+    rawValues = filter.includedValues;
+  } else if (filter && Array.isArray(filter.items)) {
+    rawValues = filter.items;
   } else if (filter && Array.isArray(filter.expressions)) {
     rawValues = filter.expressions;
+  } else if (filter && Array.isArray(filter.clauses)) {
+    rawValues = filter.clauses.reduce(function(values, clause) {
+      if (Array.isArray(clause.values)) {
+        return values.concat(clause.values);
+      }
+      if (Array.isArray(clause.expressions)) {
+        return values.concat(clause.expressions);
+      }
+      if (typeof clause.value !== 'undefined') {
+        values.push(clause.value);
+      }
+      return values;
+    }, []);
   } else if (filter && typeof filter.value !== 'undefined') {
     rawValues = [filter.value];
+  } else if (filter && filter.condition && typeof filter.condition.value !== 'undefined') {
+    rawValues = [filter.condition.value];
   }
 
   return rawValues
