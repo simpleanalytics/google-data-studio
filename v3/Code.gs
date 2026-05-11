@@ -6,6 +6,7 @@
  */
 
 const LOOKER_ENDPOINT = 'https://simpleanalytics.com/api/looker/query';
+const LOOKER_SCHEMA_ENDPOINT = 'https://simpleanalytics.com/api/looker/schema';
 const DEFAULT_TIMEZONE = 'Etc/UTC';
 const MAX_METRICS = 10;
 const MAX_DIMENSIONS = 5;
@@ -217,7 +218,43 @@ function getFieldCatalog(request) {
     return FIELD_CATALOG;
   }
 
-  return EVENT_FIELD_CATALOG;
+  return EVENT_FIELD_CATALOG.concat(getEventMetadataCatalog(request));
+}
+
+function getEventMetadataCatalog(request) {
+  const configParams = request && request.configParams ? request.configParams : {};
+  const hostname = normalizeHostname(configParams.hostname);
+  const apiKey = normalizeText(configParams.apiKey);
+
+  if (!hostname || !apiKey) {
+    return [];
+  }
+
+  try {
+    const response = UrlFetchApp.fetch(
+      LOOKER_SCHEMA_ENDPOINT + '?hostname=' + encodeURIComponent(hostname) + '&dataset=' + encodeURIComponent(DATASETS.EVENTS),
+      {
+        method: 'get',
+        headers: {
+          'Api-Key': apiKey
+        },
+        muteHttpExceptions: true
+      }
+    );
+
+    if (response.getResponseCode() < 200 || response.getResponseCode() >= 300) {
+      return [];
+    }
+
+    const data = JSON.parse(response.getContentText());
+    const schema = Array.isArray(data.schema) ? data.schema : [];
+
+    return schema.filter(function(field) {
+      return field && /^event_meta_/.test(field.name);
+    });
+  } catch (error) {
+    return [];
+  }
 }
 
 function getData(request) {
