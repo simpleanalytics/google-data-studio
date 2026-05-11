@@ -1,0 +1,445 @@
+V3 Events Connector Final Looker Studio Graph Test Suite
+
+Purpose
+
+This file defines the final end-to-end Looker Studio graph suite for Phase 6 of docs/events-v3-phased-plan.md.
+
+These tests verify the user-facing connector behavior after the API-level curl tests pass. The goal is to build a Looker Studio report that covers existing v2 pageview functionality, new v3 pageview compatibility, new v3 event functionality, and final event metadata behavior.
+
+Required data sources
+
+- Data source A: existing v2 connector, pageviews only
+- Data source B: new v3 connector configured with Dataset = Pageviews
+- Data source C: new v3 connector configured with Dataset = Events
+
+Required report controls
+
+- Date range control covering a known test period with pageviews and events
+- Data source control only if useful for comparison pages
+- Filter control for pageview dimensions
+- Filter control for event_name
+- Filter control for one approved event metadata field after metadata filters ship
+
+Recommended test data assumptions
+
+- hostname has pageviews across multiple dates
+- hostname has at least two event names, for example signup and checkout
+- event rows include at least one approved metadata key, for example plan
+- pageviews include multiple paths, countries, device types, browsers, operating systems, and UTM values
+
+Report Page 1 - V2 Existing Pageview Baseline
+
+Purpose: prove the old connector still works after v3 server changes.
+
+Graph 1.1 - Pageviews scorecard
+
+- Data source: A, v2 pageviews
+- Chart type: scorecard
+- Metric: pageviews
+- Expected: shows a non-negative number and responds to the date range control
+
+Graph 1.2 - Unique visitors scorecard
+
+- Data source: A, v2 pageviews
+- Chart type: scorecard
+- Metric: unique_visitors
+- Expected: shows a non-negative number and responds to the date range control
+
+Graph 1.3 - Average duration scorecard
+
+- Data source: A, v2 pageviews
+- Chart type: scorecard
+- Metric: avg_duration
+- Expected: shows a number and does not break aggregation
+
+Graph 1.4 - Average scroll scorecard
+
+- Data source: A, v2 pageviews
+- Chart type: scorecard
+- Metric: avg_scroll
+- Expected: shows a number and does not break aggregation
+
+Graph 1.5 - Daily pageviews time series
+
+- Data source: A, v2 pageviews
+- Chart type: time series
+- Dimension: date_day
+- Metric: pageviews
+- Expected: one row per day bucket, dates render as daily Looker dates
+
+Graph 1.6 - Top paths table
+
+- Data source: A, v2 pageviews
+- Chart type: table
+- Dimension: path
+- Metric: pageviews
+- Sort: pageviews descending
+- Expected: paths show with counts and table respects row limit
+
+Graph 1.7 - Top countries bar chart
+
+- Data source: A, v2 pageviews
+- Chart type: bar chart
+- Dimension: country_code
+- Metric: pageviews
+- Expected: country breakdown renders
+
+Graph 1.8 - Device, browser, and OS table
+
+- Data source: A, v2 pageviews
+- Chart type: table
+- Dimensions: device_type, browser_name, os_name
+- Metrics: pageviews, unique_visitors
+- Expected: multi-dimension table renders and metrics are numeric
+
+Graph 1.9 - UTM table
+
+- Data source: A, v2 pageviews
+- Chart type: table
+- Dimensions: utm_source, utm_medium, utm_campaign
+- Metric: pageviews
+- Expected: UTM dimensions render without schema errors
+
+Report Page 2 - V3 Pageview Compatibility
+
+Purpose: prove v3 pageviews match existing v2 behavior for the same report shapes.
+
+Graph 2.1 - V3 pageviews scorecard
+
+- Data source: B, v3 pageviews
+- Chart type: scorecard
+- Metric: pageviews
+- Expected: value matches Graph 1.1 for the same date range
+
+Graph 2.2 - V3 unique visitors scorecard
+
+- Data source: B, v3 pageviews
+- Chart type: scorecard
+- Metric: unique_visitors
+- Expected: value matches Graph 1.2 for the same date range
+
+Graph 2.3 - V3 daily pageviews time series
+
+- Data source: B, v3 pageviews
+- Chart type: time series
+- Dimension: date_day
+- Metrics: pageviews, unique_visitors
+- Expected: data matches equivalent v2 pageview time series
+
+Graph 2.4 - V3 weekly pageviews time series
+
+- Data source: B, v3 pageviews
+- Chart type: time series
+- Dimension: date_week
+- Metric: pageviews
+- Expected: weekly buckets render and can be sorted by date
+
+Graph 2.5 - V3 monthly pageviews time series
+
+- Data source: B, v3 pageviews
+- Chart type: time series
+- Dimension: date_month
+- Metric: pageviews
+- Expected: monthly buckets render
+
+Graph 2.6 - V3 top paths table
+
+- Data source: B, v3 pageviews
+- Chart type: table
+- Dimension: path
+- Metrics: pageviews, unique_visitors, avg_duration, avg_scroll
+- Sort: pageviews descending
+- Expected: values match the v2 top paths table for shared fields
+
+Graph 2.7 - V3 pageview composite table
+
+- Data source: B, v3 pageviews
+- Chart type: table
+- Dimensions: date_day, country_code, device_type
+- Metrics: pageviews, unique_visitors
+- Expected: composite pageview table renders with no connector errors
+
+Graph 2.8 - V3 pageview filter control
+
+- Data source: B, v3 pageviews
+- Control type: drop-down list
+- Control field: country_code
+- Affected charts: Graph 2.1, Graph 2.3, Graph 2.7
+- Expected: selecting a country changes affected charts and does not affect event-only charts unless configured to do so
+
+Graph 2.9 - V3 pageview contains filter
+
+- Data source: B, v3 pageviews
+- Chart type: table
+- Dimension: path
+- Metric: pageviews
+- Chart filter: path contains a known substring, for example blog or pricing
+- Expected: all visible paths contain the selected substring
+
+Report Page 3 - V3 Event MVP Graphs
+
+Purpose: verify Phase 1 and Phase 2 event reporting in Looker Studio.
+
+Graph 3.1 - Events scorecard
+
+- Data source: C, v3 events
+- Chart type: scorecard
+- Metric: events
+- Expected: shows total custom events for the selected date range
+
+Graph 3.2 - Event unique visitors scorecard
+
+- Data source: C, v3 events
+- Chart type: scorecard
+- Metric: unique_visitors
+- Expected: shows unique visitors with event activity for the selected date range
+
+Graph 3.3 - Daily events time series
+
+- Data source: C, v3 events
+- Chart type: time series
+- Dimension: date_day
+- Metric: events
+- Expected: daily event counts render and respond to date range changes
+
+Graph 3.4 - Event unique visitors time series
+
+- Data source: C, v3 events
+- Chart type: time series
+- Dimension: date_day
+- Metric: unique_visitors
+- Expected: daily unique visitor counts render
+
+Graph 3.5 - Hourly events time series
+
+- Data source: C, v3 events
+- Chart type: time series
+- Dimension: date_hour
+- Metric: events
+- Date range: one day with known event traffic
+- Expected: hourly buckets render as Looker date-hour values
+
+Graph 3.6 - Weekly events time series
+
+- Data source: C, v3 events
+- Chart type: time series
+- Dimension: date_week
+- Metric: events
+- Expected: weekly buckets render
+
+Graph 3.7 - Monthly events time series
+
+- Data source: C, v3 events
+- Chart type: time series
+- Dimension: date_month
+- Metric: events
+- Expected: monthly buckets render
+
+Graph 3.8 - Top events table
+
+- Data source: C, v3 events
+- Chart type: table
+- Dimension: event_name
+- Metrics: events, unique_visitors
+- Sort: events descending
+- Expected: event names render with numeric metrics
+
+Graph 3.9 - Top events bar chart
+
+- Data source: C, v3 events
+- Chart type: bar chart
+- Dimension: event_name
+- Metric: events
+- Sort: events descending
+- Expected: event names render as bars in descending order
+
+Graph 3.10 - Event by date and name table
+
+- Data source: C, v3 events
+- Chart type: table
+- Dimensions: date_day, event_name
+- Metrics: events, unique_visitors
+- Sort: events descending
+- Expected: multi-dimension event table renders and respects row limit
+
+Report Page 4 - V3 Event Filter Graphs
+
+Purpose: verify Phase 3 event_name filters in Looker Studio.
+
+Graph 4.1 - Event name drop-down filter
+
+- Data source: C, v3 events
+- Control type: drop-down list
+- Control field: event_name
+- Affected charts: Graph 3.1, Graph 3.3, Graph 3.8, Graph 3.10
+- Expected: selecting one event updates all affected event charts
+
+Graph 4.2 - Single event time series
+
+- Data source: C, v3 events
+- Chart type: time series
+- Dimension: date_day
+- Metric: events
+- Chart filter: event_name equals a known event, for example signup
+- Expected: chart only counts the selected event
+
+Graph 4.3 - Two-event comparison table
+
+- Data source: C, v3 events
+- Chart type: table
+- Dimension: event_name
+- Metric: events
+- Chart filter: event_name in two known events, for example signup and checkout
+- Expected: table includes only those event names
+
+Graph 4.4 - Excluded event table
+
+- Data source: C, v3 events
+- Chart type: table
+- Dimension: event_name
+- Metric: events
+- Chart filter: event_name not equals a known event
+- Expected: excluded event does not appear
+
+Report Page 5 - V3 Event Metadata Graphs
+
+Purpose: verify Phase 4 and Phase 5 event metadata dimensions and filters.
+
+Graph 5.1 - Event metadata dimension table
+
+- Data source: C, v3 events
+- Chart type: table
+- Dimension: one approved metadata field, for example event_meta_plan
+- Metric: events
+- Sort: events descending
+- Expected: metadata values render as text and counts render as numbers
+
+Graph 5.2 - Event name by metadata table
+
+- Data source: C, v3 events
+- Chart type: table
+- Dimensions: event_name, one approved metadata field
+- Metrics: events, unique_visitors
+- Sort: events descending
+- Expected: event names break down by metadata value
+
+Graph 5.3 - Metadata time series
+
+- Data source: C, v3 events
+- Chart type: time series or table if Looker rejects this as a time series
+- Dimensions: date_day, one approved metadata field
+- Metric: events
+- Expected: date and metadata grouping works without schema errors
+
+Graph 5.4 - Metadata drop-down filter
+
+- Data source: C, v3 events
+- Control type: drop-down list
+- Control field: one approved metadata field
+- Affected charts: Graph 5.1, Graph 5.2, Graph 5.3
+- Expected: selecting a metadata value updates the affected charts
+
+Graph 5.5 - Metadata equals chart filter
+
+- Data source: C, v3 events
+- Chart type: table
+- Dimensions: event_name, approved metadata field
+- Metric: events
+- Chart filter: approved metadata field equals a known value, for example pro
+- Expected: every row has the selected metadata value
+
+Graph 5.6 - Metadata in-list chart filter
+
+- Data source: C, v3 events
+- Chart type: table
+- Dimensions: approved metadata field
+- Metric: events
+- Chart filter: approved metadata field in two known values
+- Expected: only selected metadata values appear
+
+Report Page 6 - Cross-Dataset Report Behavior
+
+Purpose: verify pageview and event data can coexist in one Looker report as separate data sources without one mixed connector schema.
+
+Graph 6.1 - Pageviews and events KPI row
+
+- Data source: B for pageviews scorecard
+- Data source: C for events scorecard
+- Chart types: two scorecards side by side
+- Metrics: pageviews and events
+- Expected: both respond to the same date range control
+
+Graph 6.2 - Pageviews and events trends
+
+- Data source: B for pageview trend
+- Data source: C for event trend
+- Chart types: two time series side by side
+- Dimensions: date_day on both
+- Metrics: pageviews and events
+- Expected: both charts align on the same date range but remain separate data sources
+
+Graph 6.3 - Top path and top event comparison
+
+- Data source: B for top path table
+- Data source: C for top event table
+- Chart types: two tables side by side
+- Dimensions: path and event_name
+- Metrics: pageviews and events
+- Expected: pageview dimensions are unavailable in the event source and event dimensions are unavailable in the pageview source
+
+Graph 6.4 - Independent controls
+
+- Data source: B pageview country filter
+- Data source: C event_name filter
+- Expected: country filter changes pageview charts; event_name filter changes event charts; controls do not produce connector errors
+
+Report Page 7 - Negative Looker Studio Checks
+
+Purpose: verify schema boundaries and failure modes in the Looker UI.
+
+Check 7.1 - Event source does not expose pageview-only fields
+
+- Data source: C, v3 events
+- Action: open available fields in chart setup
+- Expected: path, referrer_hostname, country_code, device_type, browser_name, os_name, utm_source, utm_medium, and utm_campaign are not available unless explicitly added later as event-safe dimensions
+
+Check 7.2 - Pageview source does not expose event-only fields
+
+- Data source: B, v3 pageviews
+- Action: open available fields in chart setup
+- Expected: event_name and event metadata fields are not available
+
+Check 7.3 - Dataset change is treated as schema-changing
+
+- Data source: B or C
+- Action: change Dataset in connector config
+- Expected: Looker prompts for field refresh or otherwise makes schema changes visible
+
+Check 7.4 - Unsupported metadata field is unavailable
+
+- Data source: C, v3 events
+- Action: search fields for a known unapproved metadata key
+- Expected: field is not available
+
+Check 7.5 - Date range control works across v2 and v3 sources
+
+- Data sources: A, B, C
+- Action: change the report date range
+- Expected: every graph updates and no connector error is shown
+
+Final acceptance checklist
+
+- All v2 pageview graphs still render.
+- Equivalent v2 and v3 pageview graphs match for the same hostname, date range, dimensions, metrics, filters, sort, and row limit.
+- V3 event scorecards render.
+- V3 event date histograms render for hour, day, week, month, and year.
+- V3 top event tables and bar charts render.
+- V3 event composite tables render.
+- V3 event_name filters work from chart filters and Looker controls.
+- Approved event metadata dimensions render.
+- Approved event metadata filters work.
+- Unapproved fields are not exposed in the schema.
+- Pageviews and events can appear in one report as separate data sources.
+- No graph requires mixing pageview and event fields in one data source.
+- No chart shows a connector error for supported combinations.
+- Dashboard and elasticsearch-api logs include dataset, query type, row count, and duration for the requests generated by these graphs.

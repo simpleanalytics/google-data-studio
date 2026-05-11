@@ -1,0 +1,722 @@
+V3 Events Connector Curl Tests By Phase
+
+Purpose
+
+This file defines API-level curl tests for each implementation phase in docs/events-v3-phased-plan.md.
+
+Run the tests for a phase after that phase is implemented. Re-run all earlier phase tests before moving to the next phase.
+
+Preconditions
+
+- dashboard runs locally and exposes POST /api/looker/query
+- elasticsearch-api runs locally and exposes POST /api/looker/query
+- the selected hostname has pageview data and custom event data
+- the API key has access to the selected hostname
+- jq is installed
+- metadata phase tests require at least one approved event metadata key in the test data
+
+Shared shell setup
+
+```bash
+export DASHBOARD_URL="http://localhost:3000"
+export ES_URL="http://localhost:5602"
+export API_KEY="sa_api_key_replace_me"
+export HOSTNAME="seed.com"
+export TIMEZONE="Etc/UTC"
+export START_DATE="2026-01-10"
+export END_DATE="2026-02-17"
+export EVENT_NAME="signup"
+export EVENT_NAME_2="checkout"
+export EVENT_META_FIELD="event_meta_plan"
+export EVENT_META_VALUE="pro"
+```
+
+Dashboard helper pattern
+
+```bash
+curl -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY" | jq
+```
+
+Elasticsearch API helper pattern
+
+```bash
+curl -s -X POST "$ES_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  --data "$BODY" | jq
+```
+
+Phase 0 - V3 Foundation
+
+Goal: dataset support exists without breaking current v2 pageview requests.
+
+Test 0.1 - v2-style dashboard request without dataset still works
+
+```bash
+BODY=$(cat <<JSON
+{
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "dimensions": [],
+  "metrics": ["pageviews"],
+  "filters": [],
+  "orderBy": []
+}
+JSON
+)
+
+curl -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY" \
+  | jq -e '.schema == [{"name":"pageviews","type":"NUMBER"}] and (.rows | length == 1) and (.rows[0].pageviews | type == "number")'
+```
+
+Expected result: jq exits 0.
+
+Test 0.2 - explicit dataset=pageviews matches missing dataset for the same request
+
+```bash
+BODY_V2=$(cat <<JSON
+{
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "interval": "day",
+  "dimensions": ["date"],
+  "metrics": ["pageviews", "unique_visitors"],
+  "filters": [],
+  "orderBy": [{ "field": "date", "direction": "ASC" }],
+  "limit": 100
+}
+JSON
+)
+
+BODY_V3=$(cat <<JSON
+{
+  "dataset": "pageviews",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "interval": "day",
+  "dimensions": ["date"],
+  "metrics": ["pageviews", "unique_visitors"],
+  "filters": [],
+  "orderBy": [{ "field": "date", "direction": "ASC" }],
+  "limit": 100
+}
+JSON
+)
+
+curl -s -X POST "$DASHBOARD_URL/api/looker/query" -H "Content-Type: application/json" -H "Api-Key: $API_KEY" --data "$BODY_V2" > /tmp/looker-v2-compatible.json
+curl -s -X POST "$DASHBOARD_URL/api/looker/query" -H "Content-Type: application/json" -H "Api-Key: $API_KEY" --data "$BODY_V3" > /tmp/looker-v3-pageviews.json
+
+diff -u \
+  <(jq '{schema, rows}' /tmp/looker-v2-compatible.json) \
+  <(jq '{schema, rows}' /tmp/looker-v3-pageviews.json)
+```
+
+Expected result: no diff.
+
+Test 0.3 - invalid dataset is rejected by dashboard
+
+```bash
+BODY=$(cat <<JSON
+{
+  "dataset": "sessions",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "dimensions": [],
+  "metrics": ["pageviews"],
+  "filters": [],
+  "orderBy": []
+}
+JSON
+)
+
+curl -i -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY"
+```
+
+Expected result: HTTP 400 and a JSON error message.
+
+Test 0.4 - invalid dataset is rejected by elasticsearch-api
+
+```bash
+curl -i -s -X POST "$ES_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  --data "$BODY"
+```
+
+Expected result: HTTP 400 and a JSON error message.
+
+Phase 1 - Static Event Reporting MVP
+
+Goal: event scorecards, event time series, and top events work without metadata or filters.
+
+Test 1.1 - event scorecard
+
+```bash
+BODY=$(cat <<JSON
+{
+  "dataset": "events",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "dimensions": [],
+  "metrics": ["events"],
+  "filters": [],
+  "orderBy": []
+}
+JSON
+)
+
+curl -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY" \
+  | jq -e '.schema == [{"name":"events","type":"NUMBER"}] and (.rows | length == 1) and (.rows[0].events | type == "number")'
+```
+
+Expected result: jq exits 0.
+
+Test 1.2 - event unique visitors scorecard
+
+```bash
+BODY=$(cat <<JSON
+{
+  "dataset": "events",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "dimensions": [],
+  "metrics": ["unique_visitors"],
+  "filters": [],
+  "orderBy": []
+}
+JSON
+)
+
+curl -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY" \
+  | jq -e '.schema == [{"name":"unique_visitors","type":"NUMBER"}] and (.rows | length == 1) and (.rows[0].unique_visitors | type == "number")'
+```
+
+Expected result: jq exits 0.
+
+Test 1.3 - event date histogram interval coverage
+
+```bash
+for interval in hour day week month year; do
+  BODY=$(cat <<JSON
+{
+  "dataset": "events",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "interval": "$interval",
+  "dimensions": ["date"],
+  "metrics": ["events"],
+  "filters": [],
+  "orderBy": [{ "field": "date", "direction": "ASC" }],
+  "limit": 1000
+}
+JSON
+)
+
+  curl -s -X POST "$DASHBOARD_URL/api/looker/query" \
+    -H "Content-Type: application/json" \
+    -H "Api-Key: $API_KEY" \
+    --data "$BODY" > "/tmp/events-$interval.json"
+
+  case "$interval" in
+    hour) regex='^[0-9]{10}$' ;;
+    day) regex='^[0-9]{8}$' ;;
+    week) regex='^[0-9]{6}$' ;;
+    month) regex='^[0-9]{6}$' ;;
+    year) regex='^[0-9]{4}$' ;;
+  esac
+
+  jq -e --arg regex "$regex" '.schema == [{"name":"date","type":"STRING"},{"name":"events","type":"NUMBER"}] and (.rows | length > 0) and all(.rows[]; (.date | test($regex)) and (.events | type == "number"))' "/tmp/events-$interval.json"
+done
+```
+
+Expected result: jq exits 0 for every interval.
+
+Test 1.4 - top events sorted by events descending
+
+```bash
+BODY=$(cat <<JSON
+{
+  "dataset": "events",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "dimensions": ["event_name"],
+  "metrics": ["events"],
+  "filters": [],
+  "orderBy": [{ "field": "events", "direction": "DESC" }],
+  "limit": 20
+}
+JSON
+)
+
+curl -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY" \
+  | jq -e '.schema == [{"name":"event_name","type":"STRING"},{"name":"events","type":"NUMBER"}] and (.rows | length > 0) and all(.rows[]; (.event_name | type == "string") and (.events | type == "number"))'
+```
+
+Expected result: jq exits 0.
+
+Test 1.5 - event filters are rejected until Phase 3
+
+```bash
+BODY=$(cat <<JSON
+{
+  "dataset": "events",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "dimensions": ["event_name"],
+  "metrics": ["events"],
+  "filters": [{ "field": "event_name", "operator": "EQUALS", "values": ["$EVENT_NAME"] }],
+  "orderBy": [{ "field": "events", "direction": "DESC" }],
+  "limit": 20
+}
+JSON
+)
+
+curl -i -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY"
+```
+
+Expected result before Phase 3: HTTP 400. After Phase 3 this test should be removed or inverted.
+
+Test 1.6 - dashboard and elasticsearch-api event responses match for static event request
+
+```bash
+BODY=$(cat <<JSON
+{
+  "dataset": "events",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "dimensions": ["event_name"],
+  "metrics": ["events", "unique_visitors"],
+  "filters": [],
+  "orderBy": [{ "field": "events", "direction": "DESC" }],
+  "limit": 20
+}
+JSON
+)
+
+curl -s -X POST "$DASHBOARD_URL/api/looker/query" -H "Content-Type: application/json" -H "Api-Key: $API_KEY" --data "$BODY" > /tmp/events-dashboard.json
+curl -s -X POST "$ES_URL/api/looker/query" -H "Content-Type: application/json" --data "$BODY" > /tmp/events-es.json
+
+diff -u \
+  <(jq '{schema, rows}' /tmp/events-dashboard.json) \
+  <(jq '{schema, rows}' /tmp/events-es.json)
+```
+
+Expected result: no diff.
+
+Phase 2 - Multi-Dimension Event Tables
+
+Goal: composite event queries work for event dimensions.
+
+Test 2.1 - date and event_name composite table
+
+```bash
+BODY=$(cat <<JSON
+{
+  "dataset": "events",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "interval": "day",
+  "dimensions": ["date", "event_name"],
+  "metrics": ["events"],
+  "filters": [],
+  "orderBy": [{ "field": "events", "direction": "DESC" }],
+  "limit": 100
+}
+JSON
+)
+
+curl -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY" \
+  | jq -e '.schema == [{"name":"date","type":"STRING"},{"name":"event_name","type":"STRING"},{"name":"events","type":"NUMBER"}] and (.rows | length > 0) and all(.rows[]; (.date | test("^[0-9]{8}$")) and (.event_name | type == "string") and (.events | type == "number"))'
+```
+
+Expected result: jq exits 0.
+
+Test 2.2 - event_name with multiple metrics
+
+```bash
+BODY=$(cat <<JSON
+{
+  "dataset": "events",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "dimensions": ["event_name"],
+  "metrics": ["events", "unique_visitors"],
+  "filters": [],
+  "orderBy": [{ "field": "unique_visitors", "direction": "DESC" }],
+  "limit": 100
+}
+JSON
+)
+
+curl -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY" \
+  | jq -e '.schema == [{"name":"event_name","type":"STRING"},{"name":"events","type":"NUMBER"},{"name":"unique_visitors","type":"NUMBER"}] and (.rows | length > 0) and all(.rows[]; (.events | type == "number") and (.unique_visitors | type == "number"))'
+```
+
+Expected result: jq exits 0.
+
+Test 2.3 - pageview field remains invalid for event dataset
+
+```bash
+BODY=$(cat <<JSON
+{
+  "dataset": "events",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "dimensions": ["path"],
+  "metrics": ["events"],
+  "filters": [],
+  "orderBy": [{ "field": "events", "direction": "DESC" }],
+  "limit": 20
+}
+JSON
+)
+
+curl -i -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY"
+```
+
+Expected result: HTTP 400.
+
+Phase 3 - Event Filter Controls
+
+Goal: event_name filters are accepted and pushed down.
+
+Test 3.1 - event_name EQUALS filter
+
+```bash
+BODY=$(cat <<JSON
+{
+  "dataset": "events",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "dimensions": ["event_name"],
+  "metrics": ["events"],
+  "filters": [{ "field": "event_name", "operator": "EQUALS", "values": ["$EVENT_NAME"] }],
+  "orderBy": [{ "field": "events", "direction": "DESC" }],
+  "limit": 20
+}
+JSON
+)
+
+curl -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY" \
+  | jq -e --arg event "$EVENT_NAME" '.rows | all(.[]; .event_name == $event)'
+```
+
+Expected result: jq exits 0.
+
+Test 3.2 - event_name IN filter
+
+```bash
+BODY=$(cat <<JSON
+{
+  "dataset": "events",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "dimensions": ["event_name"],
+  "metrics": ["events"],
+  "filters": [{ "field": "event_name", "operator": "IN", "values": ["$EVENT_NAME", "$EVENT_NAME_2"] }],
+  "orderBy": [{ "field": "events", "direction": "DESC" }],
+  "limit": 20
+}
+JSON
+)
+
+curl -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY" \
+  | jq -e --arg a "$EVENT_NAME" --arg b "$EVENT_NAME_2" '.rows | all(.[]; .event_name == $a or .event_name == $b)'
+```
+
+Expected result: jq exits 0.
+
+Test 3.3 - event_name NOT_EQUALS filter
+
+```bash
+BODY=$(cat <<JSON
+{
+  "dataset": "events",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "dimensions": ["event_name"],
+  "metrics": ["events"],
+  "filters": [{ "field": "event_name", "operator": "NOT_EQUALS", "values": ["$EVENT_NAME"] }],
+  "orderBy": [{ "field": "events", "direction": "DESC" }],
+  "limit": 20
+}
+JSON
+)
+
+curl -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY" \
+  | jq -e --arg event "$EVENT_NAME" '.rows | all(.[]; .event_name != $event)'
+```
+
+Expected result: jq exits 0.
+
+Test 3.4 - unsupported event filter field is rejected
+
+```bash
+BODY=$(cat <<JSON
+{
+  "dataset": "events",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "dimensions": ["event_name"],
+  "metrics": ["events"],
+  "filters": [{ "field": "path", "operator": "EQUALS", "values": ["/"] }],
+  "orderBy": [{ "field": "events", "direction": "DESC" }],
+  "limit": 20
+}
+JSON
+)
+
+curl -i -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY"
+```
+
+Expected result: HTTP 400.
+
+Phase 4 - Guarded Event Metadata Dimensions
+
+Goal: approved event metadata dimensions are discoverable and queryable.
+
+Test 4.1 - event schema helper returns approved metadata fields
+
+```bash
+curl -s "$DASHBOARD_URL/api/looker/schema?hostname=$HOSTNAME&dataset=events" \
+  -H "Api-Key: $API_KEY" \
+  | jq -e --arg field "$EVENT_META_FIELD" '.schema | any(.name == $field and .semantics.conceptType == "DIMENSION")'
+```
+
+Expected result: jq exits 0.
+
+Test 4.2 - group events by approved metadata field
+
+```bash
+BODY=$(cat <<JSON
+{
+  "dataset": "events",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "dimensions": ["$EVENT_META_FIELD"],
+  "metrics": ["events"],
+  "filters": [],
+  "orderBy": [{ "field": "events", "direction": "DESC" }],
+  "limit": 20
+}
+JSON
+)
+
+curl -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY" \
+  | jq -e --arg field "$EVENT_META_FIELD" '.schema[0].name == $field and (.rows | length > 0) and all(.rows[]; (.[$field] | type == "string") and (.events | type == "number"))'
+```
+
+Expected result: jq exits 0.
+
+Test 4.3 - unknown metadata dimension is rejected
+
+```bash
+BODY=$(cat <<JSON
+{
+  "dataset": "events",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "dimensions": ["event_meta_unknown_key"],
+  "metrics": ["events"],
+  "filters": [],
+  "orderBy": [{ "field": "events", "direction": "DESC" }],
+  "limit": 20
+}
+JSON
+)
+
+curl -i -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY"
+```
+
+Expected result: HTTP 400.
+
+Phase 5 - Metadata Filters
+
+Goal: approved event metadata filters are accepted and pushed down.
+
+Test 5.1 - metadata EQUALS filter
+
+```bash
+BODY=$(cat <<JSON
+{
+  "dataset": "events",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "dimensions": ["$EVENT_META_FIELD"],
+  "metrics": ["events"],
+  "filters": [{ "field": "$EVENT_META_FIELD", "operator": "EQUALS", "values": ["$EVENT_META_VALUE"] }],
+  "orderBy": [{ "field": "events", "direction": "DESC" }],
+  "limit": 20
+}
+JSON
+)
+
+curl -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY" \
+  | jq -e --arg field "$EVENT_META_FIELD" --arg value "$EVENT_META_VALUE" '.rows | all(.[]; .[$field] == $value)'
+```
+
+Expected result: jq exits 0.
+
+Test 5.2 - metadata filter on unknown field is rejected
+
+```bash
+BODY=$(cat <<JSON
+{
+  "dataset": "events",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "dimensions": ["event_name"],
+  "metrics": ["events"],
+  "filters": [{ "field": "event_meta_unknown_key", "operator": "EQUALS", "values": ["x"] }],
+  "orderBy": [{ "field": "events", "direction": "DESC" }],
+  "limit": 20
+}
+JSON
+)
+
+curl -i -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY"
+```
+
+Expected result: HTTP 400.
+
+Test 5.3 - metadata CONTAINS remains rejected by default
+
+```bash
+BODY=$(cat <<JSON
+{
+  "dataset": "events",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "dimensions": ["$EVENT_META_FIELD"],
+  "metrics": ["events"],
+  "filters": [{ "field": "$EVENT_META_FIELD", "operator": "CONTAINS", "values": ["$EVENT_META_VALUE"] }],
+  "orderBy": [{ "field": "events", "direction": "DESC" }],
+  "limit": 20
+}
+JSON
+)
+
+curl -i -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY"
+```
+
+Expected result: HTTP 400 unless CONTAINS is explicitly added later.
+
+Phase 6 - Hardening And Release API Smoke Suite
+
+Goal: verify v2 compatibility, v3 pageviews, v3 events, filters, metadata, and rejection paths before Looker Studio graph testing.
+
+Run all Phase 0 through Phase 5 tests first.
+
+Additional Phase 6 checks:
+
+- Repeat every successful dashboard request directly against elasticsearch-api and compare `{ schema, rows }`.
+- Repeat pageview requests without `dataset` and with `dataset=pageviews` and compare `{ schema, rows }`.
+- Confirm every error case returns HTTP 400, not HTTP 500.
+- Confirm response `meta.queryType` is correct for scorecard, date_histogram, terms, and composite.
+- Confirm response `meta.rowCount` equals `.rows | length` for every successful response.
+- Confirm `meta.truncated` is true when a small `limit` cuts off grouped rows.
+- Confirm access checks still happen at the dashboard layer by calling the dashboard endpoint with a bad API key and expecting HTTP 403.
+
+Phase 6 sample meta check
+
+```bash
+BODY=$(cat <<JSON
+{
+  "dataset": "events",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "dateRange": { "start": "$START_DATE", "end": "$END_DATE" },
+  "dimensions": ["event_name"],
+  "metrics": ["events"],
+  "filters": [],
+  "orderBy": [{ "field": "events", "direction": "DESC" }],
+  "limit": 1
+}
+JSON
+)
+
+curl -s -X POST "$DASHBOARD_URL/api/looker/query" \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: $API_KEY" \
+  --data "$BODY" \
+  | jq -e '.meta.queryType == "terms" and .meta.rowCount == (.rows | length) and (.meta.truncated | type == "boolean")'
+```
+
+Expected result: jq exits 0.
