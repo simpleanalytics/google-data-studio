@@ -41,6 +41,10 @@ const FIELD_FILTER_RULES = {
   utm_campaign: [FILTER_OPERATORS.EQUALS, FILTER_OPERATORS.IN, FILTER_OPERATORS.CONTAINS, FILTER_OPERATORS.NOT_EQUALS]
 };
 
+const EVENT_FIELD_FILTER_RULES = {
+  event_name: [FILTER_OPERATORS.EQUALS, FILTER_OPERATORS.IN, FILTER_OPERATORS.NOT_EQUALS]
+};
+
 const FIELD_CATALOG = [
   createDateField('date_hour', 'Date Hour', 'YEAR_MONTH_DAY_HOUR', 'hour', '^\\d{10}$'),
   createDateField('date_day', 'Date Day', 'YEAR_MONTH_DAY', 'day', '^\\d{8}$'),
@@ -220,9 +224,10 @@ function getData(request) {
   const config = getValidatedConfig(request);
   const fieldCatalog = getFieldCatalog(request);
   const fieldCatalogById = buildFieldCatalogById(fieldCatalog);
+  const fieldCatalogByAlias = buildFieldCatalogByAlias(fieldCatalog);
   const requestedFieldIds = getRequestedFieldIds(request, fieldCatalogById);
   const dateRange = getValidatedDateRange(request);
-  const queryPlan = buildQueryPlan(requestedFieldIds, request, fieldCatalogById, config.dataset);
+  const queryPlan = buildQueryPlan(requestedFieldIds, request, fieldCatalogById, fieldCatalogByAlias, config.dataset);
   const payload = buildRequestPayload(config, dateRange, queryPlan);
 
   Logger.log(
@@ -290,6 +295,15 @@ function buildFieldCatalogById(fieldCatalog) {
   }, {});
 }
 
+function buildFieldCatalogByAlias(fieldCatalog) {
+  return fieldCatalog.reduce(function(catalog, field) {
+    getFieldAliases(field).forEach(function(alias) {
+      catalog[alias] = field.name;
+    });
+    return catalog;
+  }, {});
+}
+
 function getValidatedConfig(request) {
   const configParams = request && request.configParams ? request.configParams : {};
   const hostname = normalizeHostname(configParams.hostname);
@@ -343,7 +357,7 @@ function getValidatedDateRange(request) {
   };
 }
 
-function buildQueryPlan(requestedFieldIds, request, fieldCatalogById, dataset) {
+function buildQueryPlan(requestedFieldIds, request, fieldCatalogById, fieldCatalogByAlias, dataset) {
   const requestedFields = requestedFieldIds.map(function(fieldId) {
     return fieldCatalogById[fieldId];
   });
@@ -373,7 +387,7 @@ function buildQueryPlan(requestedFieldIds, request, fieldCatalogById, dataset) {
     throwUserError('Select at most one date dimension.');
   }
 
-  const filters = normalizeFilters(request, dataset);
+  const filters = normalizeFilters(request, dataset, fieldCatalogById, fieldCatalogByAlias);
   const dateDimension = dateDimensions[0] || null;
 
   const queryType = !dimensions.length
@@ -514,7 +528,7 @@ function getApiDimensions(queryPlan) {
   });
 }
 
-function normalizeFilters(request, dataset) {
+function normalizeFilters(request, dataset, fieldCatalogById, fieldCatalogByAlias) {
   const rawFilters = request && (request.dimensionsFilters || request.dimensionFilters)
     ? (request.dimensionsFilters || request.dimensionFilters)
     : [];
@@ -523,26 +537,24 @@ function normalizeFilters(request, dataset) {
     return [];
   }
 
-  if (dataset === DATASETS.EVENTS) {
-    throwUserError('Event filters are not supported yet.');
-  }
-
   return rawFilters.reduce(function(filters, rawFilter) {
-    return filters.concat(normalizeSingleFilter(rawFilter));
+    return filters.concat(normalizeSingleFilter(rawFilter, dataset, fieldCatalogById, fieldCatalogByAlias));
   }, []);
 }
 
-function normalizeSingleFilter(rawFilter) {
+function normalizeSingleFilter(rawFilter, dataset, fieldCatalogById, fieldCatalogByAlias) {
   const filterParts = expandRawFilterParts(rawFilter);
+  const filterRules = dataset === DATASETS.EVENTS ? EVENT_FIELD_FILTER_RULES : FIELD_FILTER_RULES;
 
   return filterParts.reduce(function(filters, filterPart) {
-    const fieldId = resolveFilterFieldId(filterPart);
+    const fieldId = resolveFilterFieldId(filterPart, fieldCatalogById, fieldCatalogByAlias);
     const operator = normalizeFilterOperator(filterPart);
     const values = normalizeFilterValues(filterPart);
 
-    if (!fieldId || !FIELD_CATALOG_BY_ID[fieldId]) {
+    if (!fieldId || !fieldCatalogById[fieldId]) {
       Logger.log(JSON.stringify({
         message: 'Skipping unsupported filter field shape',
+        dataset: dataset,
         rawFieldIds: getFilterFieldIds(filterPart),
         resolvedFieldId: fieldId,
         keys: Object.keys(filterPart || {})
@@ -550,7 +562,7 @@ function normalizeSingleFilter(rawFilter) {
       return filters;
     }
 
-    const allowedOperators = FIELD_FILTER_RULES[fieldId];
+    const allowedOperators = filterRules[fieldId];
 
     if (!allowedOperators) {
       throwUserError('Filtering is not supported for ' + fieldId + '.');
@@ -569,7 +581,7 @@ function normalizeSingleFilter(rawFilter) {
     }
 
     filters.push({
-      field: FIELD_CATALOG_BY_ID[fieldId].apiName,
+      field: fieldCatalogById[fieldId].apiName,
       operator: operator,
       values: values
     });
@@ -666,18 +678,18 @@ function pushFilterFieldValues(values, candidate) {
   }
 }
 
-function resolveFilterFieldId(filter) {
+function resolveFilterFieldId(filter, fieldCatalogById, fieldCatalogByAlias) {
   var rawFieldId = getFilterFieldId(filter);
 
   if (!rawFieldId) {
     return '';
   }
 
-  if (FIELD_CATALOG_BY_ID[rawFieldId]) {
+  if (fieldCatalogById[rawFieldId]) {
     return rawFieldId;
   }
 
-  return FIELD_CATALOG_BY_ALIAS[normalizeFieldKey(rawFieldId)] || '';
+  return fieldCatalogByAlias[normalizeFieldKey(rawFieldId)] || '';
 }
 
 function normalizeFilterOperator(filter) {
