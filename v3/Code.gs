@@ -384,10 +384,6 @@ function buildQueryPlan(requestedFieldIds, request, fieldCatalogById, dataset) {
         ? QUERY_TYPES.TERMS
         : QUERY_TYPES.COMPOSITE;
 
-  if (dataset === DATASETS.EVENTS && queryType === QUERY_TYPES.COMPOSITE) {
-    throwUserError('Event composite queries are not supported yet.');
-  }
-
   const orderBy = buildOrderBy(request, dimensions, metrics, queryType);
   const limit = buildLimit(request);
 
