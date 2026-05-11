@@ -62,6 +62,17 @@ const FIELD_CATALOG = [
   createMetricField('avg_scroll', 'Avg Scroll')
 ];
 
+const EVENT_FIELD_CATALOG = [
+  createDateField('date_hour', 'Date Hour', 'YEAR_MONTH_DAY_HOUR', 'hour', '^\\d{10}$'),
+  createDateField('date_day', 'Date Day', 'YEAR_MONTH_DAY', 'day', '^\\d{8}$'),
+  createDateField('date_week', 'Date Week', 'YEAR_WEEK', 'week', '^\\d{6}$'),
+  createDateField('date_month', 'Date Month', 'YEAR_MONTH', 'month', '^\\d{6}$'),
+  createDateField('date_year', 'Date Year', 'YEAR', 'year', '^\\d{4}$'),
+  createDimensionField('event_name', 'Event Name'),
+  createMetricField('events', 'Events', true),
+  createMetricField('unique_visitors', 'Unique Visitors')
+];
+
 const FIELD_CATALOG_BY_ID = FIELD_CATALOG.reduce(function(catalog, field) {
   catalog[field.name] = field;
   return catalog;
@@ -202,14 +213,16 @@ function getFieldCatalog(request) {
     return FIELD_CATALOG;
   }
 
-  return [];
+  return EVENT_FIELD_CATALOG;
 }
 
 function getData(request) {
   const config = getValidatedConfig(request);
-  const requestedFieldIds = getRequestedFieldIds(request, getFieldCatalog(request));
+  const fieldCatalog = getFieldCatalog(request);
+  const fieldCatalogById = buildFieldCatalogById(fieldCatalog);
+  const requestedFieldIds = getRequestedFieldIds(request, fieldCatalogById);
   const dateRange = getValidatedDateRange(request);
-  const queryPlan = buildQueryPlan(requestedFieldIds, request);
+  const queryPlan = buildQueryPlan(requestedFieldIds, request, fieldCatalogById, config.dataset);
   const payload = buildRequestPayload(config, dateRange, queryPlan);
 
   Logger.log(
@@ -236,24 +249,20 @@ function getData(request) {
   const rows = data.rows.map(function(row) {
     return {
       values: requestedFieldIds.map(function(fieldId) {
-        return serializeValue(getFieldValue(fieldId, row));
+        return serializeValue(getFieldValue(fieldId, row, fieldCatalogById));
       })
     };
   });
 
   return {
     schema: requestedFieldIds.map(function(fieldId) {
-      return toSchemaField(FIELD_CATALOG_BY_ID[fieldId]);
+      return toSchemaField(fieldCatalogById[fieldId]);
     }),
     rows: rows
   };
 }
 
-function getRequestedFieldIds(request, fieldCatalog) {
-  const fieldCatalogById = fieldCatalog.reduce(function(catalog, field) {
-    catalog[field.name] = field;
-    return catalog;
-  }, {});
+function getRequestedFieldIds(request, fieldCatalogById) {
   const fields = request && request.fields ? request.fields : [];
   const requestedFieldIds = fields.map(function(field) {
     return field.name;
@@ -272,6 +281,13 @@ function getRequestedFieldIds(request, fieldCatalog) {
   }
 
   return requestedFieldIds;
+}
+
+function buildFieldCatalogById(fieldCatalog) {
+  return fieldCatalog.reduce(function(catalog, field) {
+    catalog[field.name] = field;
+    return catalog;
+  }, {});
 }
 
 function getValidatedConfig(request) {
@@ -327,9 +343,9 @@ function getValidatedDateRange(request) {
   };
 }
 
-function buildQueryPlan(requestedFieldIds, request) {
+function buildQueryPlan(requestedFieldIds, request, fieldCatalogById, dataset) {
   const requestedFields = requestedFieldIds.map(function(fieldId) {
-    return FIELD_CATALOG_BY_ID[fieldId];
+    return fieldCatalogById[fieldId];
   });
   const dimensions = requestedFields.filter(function(field) {
     return field.semantics.conceptType === 'DIMENSION';
@@ -357,7 +373,7 @@ function buildQueryPlan(requestedFieldIds, request) {
     throwUserError('Select at most one date dimension.');
   }
 
-  const filters = normalizeFilters(request);
+  const filters = normalizeFilters(request, dataset);
   const dateDimension = dateDimensions[0] || null;
 
   const queryType = !dimensions.length
@@ -367,6 +383,10 @@ function buildQueryPlan(requestedFieldIds, request) {
     : dimensions.length === 1
         ? QUERY_TYPES.TERMS
         : QUERY_TYPES.COMPOSITE;
+
+  if (dataset === DATASETS.EVENTS && queryType === QUERY_TYPES.COMPOSITE) {
+    throwUserError('Event composite queries are not supported yet.');
+  }
 
   const orderBy = buildOrderBy(request, dimensions, metrics, queryType);
   const limit = buildLimit(request);
@@ -498,13 +518,17 @@ function getApiDimensions(queryPlan) {
   });
 }
 
-function normalizeFilters(request) {
+function normalizeFilters(request, dataset) {
   const rawFilters = request && (request.dimensionsFilters || request.dimensionFilters)
     ? (request.dimensionsFilters || request.dimensionFilters)
     : [];
 
   if (!Array.isArray(rawFilters) || !rawFilters.length) {
     return [];
+  }
+
+  if (dataset === DATASETS.EVENTS) {
+    throwUserError('Event filters are not supported yet.');
   }
 
   return rawFilters.reduce(function(filters, rawFilter) {
@@ -879,8 +903,8 @@ function hasValidMetricValues(row, metricFields) {
   });
 }
 
-function getFieldValue(fieldId, row) {
-  const field = FIELD_CATALOG_BY_ID[fieldId];
+function getFieldValue(fieldId, row, fieldCatalogById) {
+  const field = fieldCatalogById[fieldId];
   return row[field.apiName];
 }
 
