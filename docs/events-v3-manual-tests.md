@@ -41,7 +41,7 @@ Default output prints expected results, assertions, and concise response summari
 
 ## Metadata
 
-- Confirm `event_meta_plan` appears in the v3 events data source.
-- Group events by `event_meta_plan`.
-- Filter events by `event_meta_plan` using equals, in-list, and not-equals.
+- Confirm approved `event_meta_*` fields appear in the v3 events data source.
+- Group events by an approved metadata field, for example `event_meta_plan`.
+- Filter events by an approved metadata field using equals, in-list, and not-equals.
 - Confirm unknown `event_meta_*` fields are unavailable/rejected.

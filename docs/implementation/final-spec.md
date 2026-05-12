@@ -8,6 +8,10 @@ This document describes the current intended connector behavior without the earl
 - dashboard proxy remains the connector-facing entrypoint
 - elasticsearch-api remains the upstream query executor
 - all requests and responses use JSON
+- v2 requests may omit `dataset`; omitted `dataset` means `pageviews`
+- v3 requests include `dataset`: `pageviews` or `events`
+- one v3 data source exposes one dataset schema at a time
+- mixed pageview and event fields are not supported in one query
 
 ## Supported Query Shapes
 
@@ -32,12 +36,21 @@ Notes:
 
 ## Supported Metrics
 
+Pageview metrics:
+
 - `pageviews`
 - `unique_visitors`
 - `avg_duration`
 - `avg_scroll`
 
+Event metrics:
+
+- `events`
+- `unique_visitors`
+
 ## Supported Dimensions
+
+Pageview dimensions:
 
 - `date_hour`
 - `date_day`
@@ -53,6 +66,16 @@ Notes:
 - `utm_source`
 - `utm_medium`
 - `utm_campaign`
+
+Event dimensions:
+
+- `date_hour`
+- `date_day`
+- `date_week`
+- `date_month`
+- `date_year`
+- `event_name`
+- approved metadata dimensions returned by `GET /api/looker/schema?hostname=...&dataset=events`
 
 ## Filter Support
 
@@ -70,6 +93,21 @@ Supported operators:
 - `utm_source`
 - `utm_medium`
 - `utm_campaign`
+
+Event filters support `EQUALS`, `IN`, and `NOT_EQUALS` for:
+
+- `event_name`
+- approved metadata dimensions returned by the schema helper
+
+## Event Metadata Schema
+
+- dashboard owns `GET /api/looker/schema?hostname=...&dataset=events`
+- the endpoint validates API access for the requested hostname
+- approved metadata fields use deterministic `event_meta_*` ids
+- metadata keys are discovered from event `metadata_keys`
+- unsafe identifier-like keys are blocked
+- URL parameter metadata normalizes `sa_urlparam_` to `sa_p_` internally
+- query execution maps `event_meta_<key>` to `metadata_flattened.<key>`
 
 ## Sorting
 
@@ -95,6 +133,7 @@ Supported operators:
     }
   ],
   "meta": {
+    "dataset": "pageviews",
     "queryType": "composite",
     "rowCount": 1,
     "truncated": false
