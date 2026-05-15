@@ -268,24 +268,6 @@ function getData(request) {
   const queryPlan = buildQueryPlan(requestedFieldIds, request, fieldCatalogById, fieldCatalogByAlias, config.dataset);
   const payload = buildRequestPayload(config, dateRange, queryPlan);
 
-  Logger.log(
-    JSON.stringify({
-      message: 'Fetching Looker data',
-      fingerprint: buildQueryFingerprint(queryPlan, payload),
-      endpoint: LOOKER_ENDPOINT,
-      dataset: config.dataset,
-      queryType: queryPlan.queryType,
-      dimensionCount: payload.dimensions.length,
-      metricCount: payload.metrics.length,
-      filterCount: payload.filters.length,
-      dimensions: payload.dimensions,
-      metrics: payload.metrics,
-      filters: summarizeFilters(queryPlan.filters),
-      interval: payload.interval || null,
-      hostname: config.hostname
-    })
-  );
-
   const data = fetchJson(payload, config.apiKey);
   validateResponseRows(data, queryPlan);
 
@@ -590,13 +572,6 @@ function normalizeSingleFilter(rawFilter, dataset, fieldCatalogById, fieldCatalo
     const values = normalizeFilterValues(filterPart);
 
     if (!fieldId || !fieldCatalogById[fieldId]) {
-      Logger.log(JSON.stringify({
-        message: 'Skipping unsupported filter field shape',
-        dataset: dataset,
-        rawFieldIds: getFilterFieldIds(filterPart),
-        resolvedFieldId: fieldId,
-        keys: Object.keys(filterPart || {})
-      }));
       return filters;
     }
 
