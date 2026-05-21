@@ -20,7 +20,7 @@ Shared shell setup
 ```bash
 export DASHBOARD_URL="http://localhost:3000"
 export ES_URL="http://localhost:5602"
-export API_KEY="sa_api_key_replace_me"
+export API_KEY="sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ"
 export HOSTNAME="seed.com"
 export TIMEZONE="Etc/UTC"
 export START_DATE="2026-01-10"

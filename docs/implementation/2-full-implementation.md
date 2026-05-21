@@ -1,5 +1,9 @@
 # Full Implementation Plan
 
+This is the historical phased build plan.
+
+For the current finalized connector contract and guardrails, use `docs/implementation/final-spec.md`.
+
 This document describes the full implementation path for the `v2` Looker Studio connector.
 
 It is organized by phase on purpose. Each phase explains:
@@ -539,8 +543,9 @@ Make the connector safe to roll out and easy to debug when something goes wrong.
 - max dimensions: `3`
 - max metrics: `5`
 - max rows: `1000`
-- max response size
+- max response size: `1 MiB` JSON payload
 - reject unsupported combinations instead of silently approximating them
+- reject `limit > 1000` with `400` instead of silently clipping oversized requests
 
 #### Response shape
 

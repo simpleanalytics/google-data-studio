@@ -42,6 +42,6 @@ Default output prints expected results, assertions, and concise response summari
 ## Metadata
 
 - Confirm approved `event_meta_*` fields appear in the v3 events data source.
-- Group events by an approved metadata field, for example `event_meta_plan`.
+- Group events by an approved metadata field returned by schema discovery.
 - Filter events by an approved metadata field using equals, in-list, and not-equals.
 - Confirm unknown `event_meta_*` fields are unavailable/rejected.

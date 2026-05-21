@@ -103,11 +103,11 @@ Event filters support `EQUALS`, `IN`, and `NOT_EQUALS` for:
 
 - dashboard owns `GET /api/looker/schema?hostname=...&dataset=events`
 - the endpoint validates API access for the requested hostname
+- schema discovery defaults to the last 365 days when no date range is provided
 - approved metadata fields use deterministic `event_meta_*` ids
-- metadata keys are discovered from event `metadata_keys`
-- unsafe identifier-like keys are blocked
+- metadata keys are discovered through elasticsearch-api `GET /api/datapoints/metadata`
 - URL parameter metadata normalizes `sa_urlparam_` to `sa_p_` internally
-- query execution maps `event_meta_<key>` to `metadata_flattened.<key>`
+- query execution maps `event_meta_<key>` to the discovered typed Elasticsearch field, for example `metadata_flattened.plan_text`
 
 ## Sorting
 

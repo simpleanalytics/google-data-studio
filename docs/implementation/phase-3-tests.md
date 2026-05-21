@@ -17,7 +17,7 @@ Phase 3 is done when dashboard and elasticsearch-api both accept normalized filt
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key:  sa_api_key_MT6i5VuHebBzqJRlVWUolPqwlCryxqbjvMcO" \
   --data '{
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
@@ -42,7 +42,7 @@ Useful check:
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key:  sa_api_key_MT6i5VuHebBzqJRlVWUolPqwlCryxqbjvMcO" \
   --data '{"hostname":"seed.com","timezone":"Etc/UTC","dateRange":{"start":"2026-01-10","end":"2026-02-17"},"dimensions":["country_code"],"metrics":["pageviews"],"filters":[{"field":"country_code","operator":"EQUALS","values":["NL"]}],"orderBy":[{"field":"pageviews","direction":"DESC"}],"limit":20}' \
   | jq -e '.rows | all(.[]; .country_code == "NL")'
 ```
@@ -52,7 +52,7 @@ curl -s -X POST "http://localhost:3000/api/looker/query" \
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key:  sa_api_key_MT6i5VuHebBzqJRlVWUolPqwlCryxqbjvMcO" \
   --data '{
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
@@ -77,7 +77,7 @@ Expected output:
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key:  sa_api_key_MT6i5VuHebBzqJRlVWUolPqwlCryxqbjvMcO" \
   --data '{
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
@@ -102,7 +102,7 @@ Expected output:
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key:  sa_api_key_MT6i5VuHebBzqJRlVWUolPqwlCryxqbjvMcO" \
   --data '{
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
@@ -129,7 +129,7 @@ Expected output:
 ```bash
 curl -i -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key:  sa_api_key_MT6i5VuHebBzqJRlVWUolPqwlCryxqbjvMcO" \
   --data '{
     "hostname": "seed.com",
     "timezone": "Etc/UTC",

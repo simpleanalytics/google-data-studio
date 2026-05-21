@@ -17,7 +17,7 @@ Phase 2 is done when the curated field list is exposed consistently and the firs
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" \
   --data '{
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
@@ -51,7 +51,7 @@ Expected output:
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" \
   --data '{
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
@@ -84,7 +84,7 @@ Expected output:
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" \
   --data '{
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
@@ -111,7 +111,7 @@ Expected output:
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" \
   --data '{
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
@@ -136,7 +136,7 @@ Expected output:
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" \
   --data '{
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
@@ -161,7 +161,7 @@ Expected output:
 ```bash
 curl -i -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" \
   --data '{
     "hostname": "seed.com",
     "timezone": "Etc/UTC",

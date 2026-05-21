@@ -18,14 +18,14 @@ Phase 1 is done when:
 - dashboard runs on `http://localhost:3000`
 - elasticsearch-api runs on `http://localhost:5602`
 - `seed.com` exists locally and has seeded data
-- `YOUR_API_KEY` has access to `seed.com`
+- `sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ` has access to `seed.com`
 
 ## Test 1 — Dashboard day histogram request
 
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" \
   --data '{
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
@@ -61,7 +61,7 @@ Useful check:
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" \
   --data '{"hostname":"seed.com","timezone":"Etc/UTC","dateRange":{"start":"2026-01-10","end":"2026-02-17"},"interval":"day","dimensions":["date"],"metrics":["pageviews"],"filters":[],"orderBy":[],"limit":100}' \
   | jq -e '.rows | length > 0 and all(.[]; (.date | test("^[0-9]{8}$")) and (.pageviews | type == "number"))'
 ```
@@ -73,7 +73,7 @@ Day:
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" \
   --data '{"hostname":"seed.com","timezone":"Etc/UTC","dateRange":{"start":"2026-01-10","end":"2026-02-17"},"interval":"day","dimensions":["date"],"metrics":["pageviews"],"filters":[],"orderBy":[],"limit":100}' \
   | jq -e '.rows | length > 0 and all(.[]; .date | test("^[0-9]{8}$"))'
 ```
@@ -83,7 +83,7 @@ Week:
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" \
   --data '{"hostname":"seed.com","timezone":"Etc/UTC","dateRange":{"start":"2026-01-10","end":"2026-02-17"},"interval":"week","dimensions":["date"],"metrics":["pageviews"],"filters":[],"orderBy":[],"limit":100}' \
   | jq -e '.rows | length > 0 and all(.[]; .date | test("^[0-9]{6}$"))'
 ```
@@ -93,7 +93,7 @@ Month:
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" \
   --data '{"hostname":"seed.com","timezone":"Etc/UTC","dateRange":{"start":"2026-01-10","end":"2026-02-17"},"interval":"month","dimensions":["date"],"metrics":["pageviews"],"filters":[],"orderBy":[],"limit":100}' \
   | jq -e '.rows | length > 0 and all(.[]; .date | test("^[0-9]{6}$"))'
 ```
@@ -103,7 +103,7 @@ Year:
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" \
   --data '{"hostname":"seed.com","timezone":"Etc/UTC","dateRange":{"start":"2026-01-10","end":"2026-02-17"},"interval":"year","dimensions":["date"],"metrics":["pageviews"],"filters":[],"orderBy":[],"limit":100}' \
   | jq -e '.rows | length > 0 and all(.[]; .date | test("^[0-9]{4}$"))'
 ```
@@ -113,7 +113,7 @@ Hour:
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" \
   --data '{"hostname":"seed.com","timezone":"Etc/UTC","dateRange":{"start":"2026-02-17","end":"2026-02-17"},"interval":"hour","dimensions":["date"],"metrics":["pageviews"],"filters":[],"orderBy":[],"limit":100}' \
   | jq -e '.rows | length > 0 and all(.[]; .date | test("^[0-9]{10}$"))'
 ```
@@ -159,7 +159,7 @@ Useful comparison:
 ```bash
 BODY='{"hostname":"seed.com","timezone":"Etc/UTC","dateRange":{"start":"2026-01-10","end":"2026-02-17"},"interval":"day","dimensions":["date"],"metrics":["pageviews"],"filters":[],"orderBy":[],"limit":100}'
 
-curl -s -X POST "http://localhost:3000/api/looker/query" -H "Content-Type: application/json" -H "Api-Key: YOUR_API_KEY" --data "$BODY" > /tmp/looker-dashboard.json
+curl -s -X POST "http://localhost:3000/api/looker/query" -H "Content-Type: application/json" -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" --data "$BODY" > /tmp/looker-dashboard.json
 curl -s -X POST "http://localhost:5602/api/looker/query" -H "Content-Type: application/json" --data "$BODY" > /tmp/looker-es.json
 
 diff -u <(jq '.schema, (.rows|length), .rows[0], .rows[-1]' /tmp/looker-dashboard.json) <(jq '.schema, (.rows|length), .rows[0], .rows[-1]' /tmp/looker-es.json)
@@ -172,7 +172,7 @@ Expected output: no diff.
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" \
   --data '{
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
@@ -197,7 +197,7 @@ Expected output:
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" \
   --data '{
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
@@ -233,7 +233,7 @@ Invalid field:
 ```bash
 curl -i -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" \
   --data '{
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
@@ -256,7 +256,7 @@ Invalid timezone:
 ```bash
 curl -i -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" \
   --data '{
     "hostname": "seed.com",
     "timezone": "Nope/Zone",
@@ -280,7 +280,7 @@ Invalid interval:
 ```bash
 curl -i -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" \
   --data '{
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
@@ -304,7 +304,7 @@ Expected output:
 ```bash
 curl -s -X POST "http://localhost:3000/api/looker/query" \
   -H "Content-Type: application/json" \
-  -H "Api-Key: YOUR_API_KEY" \
+  -H "Api-Key: sa_api_key_brNrig28CdxkZyJhmBrxP2deDlGDKwpWO4dJ" \
   --data '{
     "hostname": "seed.com",
     "timezone": "Etc/UTC",
