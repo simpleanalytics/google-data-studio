@@ -3,34 +3,24 @@
   "dependencies": {},
   "exceptionLogging": "STACKDRIVER",
   "runtimeVersion": "V8",
-  "urlFetchWhitelist": [
-    "https://simpleanalytics.com/"
-  ],
-  "oauthScopes": [
-    "https://www.googleapis.com/auth/script.external_request"
-  ],
+  "urlFetchWhitelist": ["https://simpleanalytics.com/"],
+  "oauthScopes": ["https://www.googleapis.com/auth/script.external_request"],
   "dataStudio": {
-    "name": "Simple Analytics",
+    "name": "Simple Analytics v1",
     "logoUrl": "https://assets.simpleanalytics.com/press/logo-ratio-1-1/square@3x.png",
     "company": "Simple Analytics",
     "companyUrl": "https://www.simpleanalytics.com/",
     "addonUrl": "https://docs.simpleanalytics.com/google-data-studio",
-    "supportUrl": "https://simpleanalytics.com/contact",
-    "privacyPolicyUrl": "https://simpleanalytics.com/privacy-policy",
-    "termsOfServiceUrl": "https://simpleanalytics.com/general-terms-and-conditions",
+    "supportUrl": "https://dashboard.simpleanalytics.com/contact",
+    "privacyPolicyUrl": "https://www.simpleanalytics.com/privacy-policy",
+    "termsOfServiceUrl": "https://www.simpleanalytics.com/general-terms-and-conditions",
     "shortDescription": "Fetch data from Simple Analytics",
     "description": "This connector lets you query analytics data from Simple Analytics. It's data that you collected via your websites. The connector needs access to simpleanalytics.com to get your analytics data.",
     "templates": {
       "default": "93606baa-294e-447c-8f41-0cc0e1326cb6"
     },
-    "sources": [
-      "SIMPLE_ANALYTICS"
-    ],
-    "authType": [
-      "NONE"
-    ],
-    "feeType": [
-      "FREE"
-    ]
+    "sources": ["SIMPLE_ANALYTICS"],
+    "authType": ["NONE"],
+    "feeType": ["FREE"]
   }
 }
