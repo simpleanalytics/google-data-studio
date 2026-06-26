@@ -1,15 +1,26 @@
 {
-  "timeZone": "Europe/Amsterdam",
+  "timeZone": "Etc/UTC",
   "dependencies": {},
   "exceptionLogging": "STACKDRIVER",
+  "oauthScopes": ["https://www.googleapis.com/auth/script.external_request"],
+  "urlFetchWhitelist": ["https://simpleanalytics.com/"],
   "runtimeVersion": "V8",
   "dataStudio": {
-    "name": "ES API Connector (POC)",
-    "logoUrl": "https://www.gstatic.com/images/branding/product/1x/data_studio_48dp.png",
+    "name": "Simple Analytics",
+    "logoUrl": "https://assets.simpleanalytics.com/press/logo-ratio-1-1/square@3x.png",
     "company": "Simple Analytics",
-    "companyUrl": "https://simpleanalytics.com",
-    "addonUrl": "https://simpleanalytics.com",
-    "supportUrl": "https://simpleanalytics.com/contact",
-    "description": "POC connector for ES API - returns pageviews per day"
+    "companyUrl": "https://www.simpleanalytics.com/",
+    "addonUrl": "https://docs.simpleanalytics.com/google-data-studio",
+    "supportUrl": "https://dashboard.simpleanalytics.com/contact",
+    "description": "This connector lets you query analytics data from Simple Analytics. It's data that you collected via your websites. The connector needs access to simpleanalytics.com to get your analytics data.",
+    "sources": ["SIMPLE_ANALYTICS"],
+    "templates": {
+      "default": "18a9f29a-5766-4751-a723-ab7b29b6b338"
+    },
+    "shortDescription": "Fetch data from Simple Analytics",
+    "authType": ["NONE"],
+    "feeType": ["FREE"],
+    "privacyPolicyUrl": "https://www.simpleanalytics.com/privacy-policy",
+    "termsOfServiceUrl": "https://www.simpleanalytics.com/general-terms-and-conditions"
   }
 }

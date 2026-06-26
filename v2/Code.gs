@@ -6,9 +6,15 @@
  */
 
 const LOOKER_ENDPOINT = 'https://simpleanalytics.com/api/looker/query';
+const LOOKER_SCHEMA_ENDPOINT = 'https://simpleanalytics.com/api/looker/schema';
 const DEFAULT_TIMEZONE = 'Etc/UTC';
 const MAX_METRICS = 10;
 const MAX_DIMENSIONS = 5;
+
+const DATASETS = {
+  PAGEVIEWS: 'pageviews',
+  EVENTS: 'events'
+};
 
 const QUERY_TYPES = {
   SCORECARD: 'scorecard',
@@ -36,6 +42,11 @@ const FIELD_FILTER_RULES = {
   utm_campaign: [FILTER_OPERATORS.EQUALS, FILTER_OPERATORS.IN, FILTER_OPERATORS.CONTAINS, FILTER_OPERATORS.NOT_EQUALS]
 };
 
+const EVENT_FIELD_FILTER_RULES = {
+  event_name: [FILTER_OPERATORS.EQUALS, FILTER_OPERATORS.IN, FILTER_OPERATORS.NOT_EQUALS],
+  event_meta_plan: [FILTER_OPERATORS.EQUALS, FILTER_OPERATORS.IN, FILTER_OPERATORS.NOT_EQUALS]
+};
+
 const FIELD_CATALOG = [
   createDateField('date_hour', 'Date Hour', 'YEAR_MONTH_DAY_HOUR', 'hour', '^\\d{10}$'),
   createDateField('date_day', 'Date Day', 'YEAR_MONTH_DAY', 'day', '^\\d{8}$'),
@@ -55,6 +66,17 @@ const FIELD_CATALOG = [
   createMetricField('unique_visitors', 'Unique Visitors'),
   createMetricField('avg_duration', 'Avg Duration'),
   createMetricField('avg_scroll', 'Avg Scroll')
+];
+
+const EVENT_FIELD_CATALOG = [
+  createDateField('date_hour', 'Date Hour', 'YEAR_MONTH_DAY_HOUR', 'hour', '^\\d{10}$'),
+  createDateField('date_day', 'Date Day', 'YEAR_MONTH_DAY', 'day', '^\\d{8}$'),
+  createDateField('date_week', 'Date Week', 'YEAR_WEEK', 'week', '^\\d{6}$'),
+  createDateField('date_month', 'Date Month', 'YEAR_MONTH', 'month', '^\\d{6}$'),
+  createDateField('date_year', 'Date Year', 'YEAR', 'year', '^\\d{4}$'),
+  createDimensionField('event_name', 'Event Name'),
+  createMetricField('events', 'Events', true),
+  createMetricField('unique_visitors', 'Unique Visitors')
 ];
 
 const FIELD_CATALOG_BY_ID = FIELD_CATALOG.reduce(function(catalog, field) {
@@ -165,6 +187,15 @@ function getConfig() {
 
   config
     .newSelectSingle()
+    .setId('dataset')
+    .setName('Dataset')
+    .setHelpText('Choose which dataset this Looker Studio data source exposes')
+    .addOption(config.newOptionBuilder().setLabel('Pageviews').setValue(DATASETS.PAGEVIEWS))
+    .addOption(config.newOptionBuilder().setLabel('Events').setValue(DATASETS.EVENTS))
+    .setAllowOverride(false);
+
+  config
+    .newSelectSingle()
     .setId('timezone')
     .setName('Timezone')
     .addOption(config.newOptionBuilder().setLabel('UTC').setValue('Etc/UTC'))
@@ -177,33 +208,65 @@ function getConfig() {
   return config.build();
 }
 
-function getSchema() {
-  return { schema: FIELD_CATALOG.map(toSchemaField) };
+function getSchema(request) {
+  return { schema: getFieldCatalog(request).map(toSchemaField) };
+}
+
+function getFieldCatalog(request) {
+  const dataset = getConfiguredDataset(request);
+
+  if (dataset === DATASETS.PAGEVIEWS) {
+    return FIELD_CATALOG;
+  }
+
+  return EVENT_FIELD_CATALOG.concat(getEventMetadataCatalog(request));
+}
+
+function getEventMetadataCatalog(request) {
+  const configParams = request && request.configParams ? request.configParams : {};
+  const hostname = normalizeHostname(configParams.hostname);
+  const apiKey = normalizeText(configParams.apiKey);
+
+  if (!hostname || !apiKey) {
+    return [];
+  }
+
+  try {
+    const response = UrlFetchApp.fetch(
+      LOOKER_SCHEMA_ENDPOINT + '?hostname=' + encodeURIComponent(hostname) + '&dataset=' + encodeURIComponent(DATASETS.EVENTS),
+      {
+        method: 'get',
+        headers: {
+          'Api-Key': apiKey
+        },
+        muteHttpExceptions: true
+      }
+    );
+
+    if (response.getResponseCode() < 200 || response.getResponseCode() >= 300) {
+      return [];
+    }
+
+    const data = JSON.parse(response.getContentText());
+    const schema = Array.isArray(data.schema) ? data.schema : [];
+
+    return schema.filter(function(field) {
+      return field && /^event_meta_/.test(field.name);
+    });
+  } catch (error) {
+    return [];
+  }
 }
 
 function getData(request) {
-  const requestedFieldIds = getRequestedFieldIds(request);
   const config = getValidatedConfig(request);
+  const fieldCatalog = getFieldCatalog(request);
+  const fieldCatalogById = buildFieldCatalogById(fieldCatalog);
+  const fieldCatalogByAlias = buildFieldCatalogByAlias(fieldCatalog);
+  const requestedFieldIds = getRequestedFieldIds(request, fieldCatalogById);
   const dateRange = getValidatedDateRange(request);
-  const queryPlan = buildQueryPlan(requestedFieldIds, request);
+  const queryPlan = buildQueryPlan(requestedFieldIds, request, fieldCatalogById, fieldCatalogByAlias, config.dataset);
   const payload = buildRequestPayload(config, dateRange, queryPlan);
-
-  Logger.log(
-    JSON.stringify({
-      message: 'Fetching Looker data',
-      fingerprint: buildQueryFingerprint(queryPlan, payload),
-      endpoint: LOOKER_ENDPOINT,
-      queryType: queryPlan.queryType,
-      dimensionCount: payload.dimensions.length,
-      metricCount: payload.metrics.length,
-      filterCount: payload.filters.length,
-      dimensions: payload.dimensions,
-      metrics: payload.metrics,
-      filters: summarizeFilters(queryPlan.filters),
-      interval: payload.interval || null,
-      hostname: config.hostname
-    })
-  );
 
   const data = fetchJson(payload, config.apiKey);
   validateResponseRows(data, queryPlan);
@@ -211,20 +274,20 @@ function getData(request) {
   const rows = data.rows.map(function(row) {
     return {
       values: requestedFieldIds.map(function(fieldId) {
-        return serializeValue(getFieldValue(fieldId, row));
+        return serializeValue(getFieldValue(fieldId, row, fieldCatalogById));
       })
     };
   });
 
   return {
     schema: requestedFieldIds.map(function(fieldId) {
-      return toSchemaField(FIELD_CATALOG_BY_ID[fieldId]);
+      return toSchemaField(fieldCatalogById[fieldId]);
     }),
     rows: rows
   };
 }
 
-function getRequestedFieldIds(request) {
+function getRequestedFieldIds(request, fieldCatalogById) {
   const fields = request && request.fields ? request.fields : [];
   const requestedFieldIds = fields.map(function(field) {
     return field.name;
@@ -235,7 +298,7 @@ function getRequestedFieldIds(request) {
   }
 
   const invalidFields = requestedFieldIds.filter(function(fieldId) {
-    return !FIELD_CATALOG_BY_ID[fieldId];
+    return !fieldCatalogById[fieldId];
   });
 
   if (invalidFields.length) {
@@ -245,11 +308,28 @@ function getRequestedFieldIds(request) {
   return requestedFieldIds;
 }
 
+function buildFieldCatalogById(fieldCatalog) {
+  return fieldCatalog.reduce(function(catalog, field) {
+    catalog[field.name] = field;
+    return catalog;
+  }, {});
+}
+
+function buildFieldCatalogByAlias(fieldCatalog) {
+  return fieldCatalog.reduce(function(catalog, field) {
+    getFieldAliases(field).forEach(function(alias) {
+      catalog[alias] = field.name;
+    });
+    return catalog;
+  }, {});
+}
+
 function getValidatedConfig(request) {
   const configParams = request && request.configParams ? request.configParams : {};
   const hostname = normalizeHostname(configParams.hostname);
   const apiKey = normalizeText(configParams.apiKey);
   const timezone = normalizeText(configParams.timezone) || DEFAULT_TIMEZONE;
+  const dataset = getConfiguredDataset(request);
 
   if (!hostname) {
     throwUserError('Please enter a valid website hostname.');
@@ -262,8 +342,24 @@ function getValidatedConfig(request) {
   return {
     hostname: hostname,
     apiKey: apiKey,
-    timezone: timezone
+    timezone: timezone,
+    dataset: dataset
   };
+}
+
+function getConfiguredDataset(request) {
+  const configParams = request && request.configParams ? request.configParams : {};
+  const dataset = normalizeText(configParams.dataset);
+
+  if (!dataset) {
+    throwUserError('Please choose a dataset.');
+  }
+
+  if (dataset !== DATASETS.PAGEVIEWS && dataset !== DATASETS.EVENTS) {
+    throwUserError('Unsupported dataset: ' + dataset);
+  }
+
+  return dataset;
 }
 
 function getValidatedDateRange(request) {
@@ -281,9 +377,9 @@ function getValidatedDateRange(request) {
   };
 }
 
-function buildQueryPlan(requestedFieldIds, request) {
+function buildQueryPlan(requestedFieldIds, request, fieldCatalogById, fieldCatalogByAlias, dataset) {
   const requestedFields = requestedFieldIds.map(function(fieldId) {
-    return FIELD_CATALOG_BY_ID[fieldId];
+    return fieldCatalogById[fieldId];
   });
   const dimensions = requestedFields.filter(function(field) {
     return field.semantics.conceptType === 'DIMENSION';
@@ -311,7 +407,7 @@ function buildQueryPlan(requestedFieldIds, request) {
     throwUserError('Select at most one date dimension.');
   }
 
-  const filters = normalizeFilters(request);
+  const filters = normalizeFilters(request, dataset, fieldCatalogById, fieldCatalogByAlias);
   const dateDimension = dateDimensions[0] || null;
 
   const queryType = !dimensions.length
@@ -426,6 +522,7 @@ function getOrderByDirection(orderBy) {
 
 function buildRequestPayload(config, dateRange, queryPlan) {
   return cleanObject({
+    dataset: config.dataset,
     hostname: config.hostname,
     timezone: config.timezone,
     dateRange: {
@@ -451,7 +548,7 @@ function getApiDimensions(queryPlan) {
   });
 }
 
-function normalizeFilters(request) {
+function normalizeFilters(request, dataset, fieldCatalogById, fieldCatalogByAlias) {
   const rawFilters = request && (request.dimensionsFilters || request.dimensionFilters)
     ? (request.dimensionsFilters || request.dimensionFilters)
     : [];
@@ -461,29 +558,24 @@ function normalizeFilters(request) {
   }
 
   return rawFilters.reduce(function(filters, rawFilter) {
-    return filters.concat(normalizeSingleFilter(rawFilter));
+    return filters.concat(normalizeSingleFilter(rawFilter, dataset, fieldCatalogById, fieldCatalogByAlias));
   }, []);
 }
 
-function normalizeSingleFilter(rawFilter) {
+function normalizeSingleFilter(rawFilter, dataset, fieldCatalogById, fieldCatalogByAlias) {
   const filterParts = expandRawFilterParts(rawFilter);
+  const filterRules = dataset === DATASETS.EVENTS ? EVENT_FIELD_FILTER_RULES : FIELD_FILTER_RULES;
 
   return filterParts.reduce(function(filters, filterPart) {
-    const fieldId = resolveFilterFieldId(filterPart);
+    const fieldId = resolveFilterFieldId(filterPart, fieldCatalogById, fieldCatalogByAlias);
     const operator = normalizeFilterOperator(filterPart);
     const values = normalizeFilterValues(filterPart);
 
-    if (!fieldId || !FIELD_CATALOG_BY_ID[fieldId]) {
-      Logger.log(JSON.stringify({
-        message: 'Skipping unsupported filter field shape',
-        rawFieldIds: getFilterFieldIds(filterPart),
-        resolvedFieldId: fieldId,
-        keys: Object.keys(filterPart || {})
-      }));
+    if (!fieldId || !fieldCatalogById[fieldId]) {
       return filters;
     }
 
-    const allowedOperators = FIELD_FILTER_RULES[fieldId];
+    const allowedOperators = filterRules[fieldId];
 
     if (!allowedOperators) {
       throwUserError('Filtering is not supported for ' + fieldId + '.');
@@ -502,7 +594,7 @@ function normalizeSingleFilter(rawFilter) {
     }
 
     filters.push({
-      field: FIELD_CATALOG_BY_ID[fieldId].apiName,
+      field: fieldCatalogById[fieldId].apiName,
       operator: operator,
       values: values
     });
@@ -599,18 +691,18 @@ function pushFilterFieldValues(values, candidate) {
   }
 }
 
-function resolveFilterFieldId(filter) {
+function resolveFilterFieldId(filter, fieldCatalogById, fieldCatalogByAlias) {
   var rawFieldId = getFilterFieldId(filter);
 
   if (!rawFieldId) {
     return '';
   }
 
-  if (FIELD_CATALOG_BY_ID[rawFieldId]) {
+  if (fieldCatalogById[rawFieldId]) {
     return rawFieldId;
   }
 
-  return FIELD_CATALOG_BY_ALIAS[normalizeFieldKey(rawFieldId)] || '';
+  return fieldCatalogByAlias[normalizeFieldKey(rawFieldId)] || '';
 }
 
 function normalizeFilterOperator(filter) {
@@ -725,6 +817,7 @@ function summarizeFilters(filters) {
 
 function buildQueryFingerprint(queryPlan, payload) {
   return JSON.stringify({
+    dataset: payload.dataset || null,
     queryType: queryPlan.queryType || null,
     dimensions: payload.dimensions || [],
     metrics: payload.metrics || [],
@@ -831,8 +924,8 @@ function hasValidMetricValues(row, metricFields) {
   });
 }
 
-function getFieldValue(fieldId, row) {
-  const field = FIELD_CATALOG_BY_ID[fieldId];
+function getFieldValue(fieldId, row, fieldCatalogById) {
+  const field = fieldCatalogById[fieldId];
   return row[field.apiName];
 }
 
