@@ -9,3 +9,11 @@ This connector lets users query data from [Simple Analytics](https://simpleanaly
 1. Click "Connect"
 
 When using this connector you are subjected to our [general terms and conditions](https://simpleanalytics.com/general-terms-and-conditions) and [privacy policy](https://simpleanalytics.com/privacy).
+
+## Metadata fields
+
+The connector discovers recent metadata fields for the configured pageviews or events dataset. Pageview metadata appears as `Pageview Meta: ...` dimensions and event metadata appears as `Event Meta: ...` dimensions.
+
+Looker Studio caches data-source fields. Refresh the data-source fields when newly collected metadata should become available in an existing report.
+
+Metadata discovery is limited to 100 safe text dimensions from the last 365 days. URL-parameter metadata is excluded. Metadata dimensions support exact, list, and not-equal filters; contains filters are not supported.
