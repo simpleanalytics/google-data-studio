@@ -16,14 +16,7 @@ const DATASETS = {
   EVENTS: 'events'
 };
 
-const METADATA_FIELD_CONFIG = {
-  pageviews: {
-    prefix: 'pageview_meta_'
-  },
-  events: {
-    prefix: 'event_meta_'
-  }
-};
+const METADATA_FIELD_PREFIX = 'meta_';
 
 const QUERY_TYPES = {
   SCORECARD: 'scorecard',
@@ -242,9 +235,8 @@ function getMetadataCatalog(request, dataset) {
   const hostname = normalizeHostname(configParams.hostname);
   const apiKey = normalizeText(configParams.apiKey);
   const timezone = normalizeText(configParams.timezone) || DEFAULT_TIMEZONE;
-  const metadataConfig = METADATA_FIELD_CONFIG[dataset];
 
-  if (!hostname || !apiKey || !metadataConfig) {
+  if (!hostname || !apiKey) {
     return [];
   }
 
@@ -271,24 +263,21 @@ function getMetadataCatalog(request, dataset) {
     const schema = Array.isArray(data.schema) ? data.schema : [];
 
     return schema.filter(function(field) {
-      return field && isMetadataFieldId(dataset, field.name);
+      return field && isMetadataFieldId(field.name);
     });
   } catch (error) {
     return [];
   }
 }
 
-function isMetadataFieldId(dataset, fieldId) {
-  const metadataConfig = METADATA_FIELD_CONFIG[dataset];
-
+function isMetadataFieldId(fieldId) {
   return Boolean(
-    metadataConfig &&
     typeof fieldId === 'string' &&
-    fieldId.indexOf(metadataConfig.prefix) === 0
+    fieldId.indexOf(METADATA_FIELD_PREFIX) === 0
   );
 }
 
-function requestUsesMetadataFields(request, dataset) {
+function requestUsesMetadataFields(request) {
   const fields = request && Array.isArray(request.fields) ? request.fields : [];
   const rawFilters = request && (request.dimensionsFilters || request.dimensionFilters)
     ? (request.dimensionsFilters || request.dimensionFilters)
@@ -310,8 +299,8 @@ function requestUsesMetadataFields(request, dataset) {
 
   return fieldReferences.some(function(fieldReference) {
     return fieldReference && (
-      isMetadataFieldId(dataset, fieldReference) ||
-      isMetadataFieldId(dataset, normalizeFieldKey(fieldReference))
+      isMetadataFieldId(fieldReference) ||
+      isMetadataFieldId(normalizeFieldKey(fieldReference))
     );
   });
 }
@@ -320,7 +309,7 @@ function getData(request) {
   const config = getValidatedConfig(request);
   const fieldCatalog = getFieldCatalog(
     request,
-    requestUsesMetadataFields(request, config.dataset)
+    requestUsesMetadataFields(request)
   );
   const fieldCatalogById = buildFieldCatalogById(fieldCatalog);
   const fieldCatalogByAlias = buildFieldCatalogByAlias(fieldCatalog);
@@ -637,7 +626,7 @@ function normalizeSingleFilter(rawFilter, dataset, fieldCatalogById, fieldCatalo
     }
 
     const allowedOperators = filterRules[fieldId] || (
-      isMetadataFieldId(dataset, fieldId) ? METADATA_FILTER_OPERATORS : null
+      isMetadataFieldId(fieldId) ? METADATA_FILTER_OPERATORS : null
     );
 
     if (!allowedOperators) {

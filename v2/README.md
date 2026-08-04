@@ -12,7 +12,7 @@ When using this connector you are subjected to our [general terms and conditions
 
 ## Metadata fields
 
-The connector discovers recent metadata fields for the configured pageviews or events dataset. Pageview metadata appears as `Pageview Meta: ...` dimensions and event metadata appears as `Event Meta: ...` dimensions.
+The connector discovers recent metadata fields for the configured pageviews or events dataset. Metadata appears as `Meta: ...` dimensions in both datasets.
 
 Looker Studio caches data-source fields. Refresh the data-source fields when newly collected metadata should become available in an existing report.
 
