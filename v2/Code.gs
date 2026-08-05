@@ -16,6 +16,8 @@ const DATASETS = {
   EVENTS: 'events'
 };
 
+const METADATA_FIELD_PREFIX = 'meta_';
+
 const QUERY_TYPES = {
   SCORECARD: 'scorecard',
   DATE_HISTOGRAM: 'date_histogram',
@@ -30,6 +32,12 @@ const FILTER_OPERATORS = {
   NOT_EQUALS: 'NOT_EQUALS'
 };
 
+const METADATA_FILTER_OPERATORS = [
+  FILTER_OPERATORS.EQUALS,
+  FILTER_OPERATORS.IN,
+  FILTER_OPERATORS.NOT_EQUALS
+];
+
 const FIELD_FILTER_RULES = {
   path: [FILTER_OPERATORS.EQUALS, FILTER_OPERATORS.IN, FILTER_OPERATORS.CONTAINS, FILTER_OPERATORS.NOT_EQUALS],
   referrer_hostname: [FILTER_OPERATORS.EQUALS, FILTER_OPERATORS.IN, FILTER_OPERATORS.CONTAINS, FILTER_OPERATORS.NOT_EQUALS],
@@ -43,8 +51,7 @@ const FIELD_FILTER_RULES = {
 };
 
 const EVENT_FIELD_FILTER_RULES = {
-  event_name: [FILTER_OPERATORS.EQUALS, FILTER_OPERATORS.IN, FILTER_OPERATORS.NOT_EQUALS],
-  event_meta_plan: [FILTER_OPERATORS.EQUALS, FILTER_OPERATORS.IN, FILTER_OPERATORS.NOT_EQUALS]
+  event_name: [FILTER_OPERATORS.EQUALS, FILTER_OPERATORS.IN, FILTER_OPERATORS.NOT_EQUALS]
 };
 
 const FIELD_CATALOG = [
@@ -212,20 +219,22 @@ function getSchema(request) {
   return { schema: getFieldCatalog(request).map(toSchemaField) };
 }
 
-function getFieldCatalog(request) {
+function getFieldCatalog(request, includeMetadata) {
   const dataset = getConfiguredDataset(request);
+  const staticCatalog = dataset === DATASETS.PAGEVIEWS
+    ? FIELD_CATALOG
+    : EVENT_FIELD_CATALOG;
 
-  if (dataset === DATASETS.PAGEVIEWS) {
-    return FIELD_CATALOG;
-  }
-
-  return EVENT_FIELD_CATALOG.concat(getEventMetadataCatalog(request));
+  return includeMetadata === false
+    ? staticCatalog
+    : staticCatalog.concat(getMetadataCatalog(request, dataset));
 }
 
-function getEventMetadataCatalog(request) {
+function getMetadataCatalog(request, dataset) {
   const configParams = request && request.configParams ? request.configParams : {};
   const hostname = normalizeHostname(configParams.hostname);
   const apiKey = normalizeText(configParams.apiKey);
+  const timezone = normalizeText(configParams.timezone) || DEFAULT_TIMEZONE;
 
   if (!hostname || !apiKey) {
     return [];
@@ -233,7 +242,10 @@ function getEventMetadataCatalog(request) {
 
   try {
     const response = UrlFetchApp.fetch(
-      LOOKER_SCHEMA_ENDPOINT + '?hostname=' + encodeURIComponent(hostname) + '&dataset=' + encodeURIComponent(DATASETS.EVENTS),
+      LOOKER_SCHEMA_ENDPOINT +
+        '?hostname=' + encodeURIComponent(hostname) +
+        '&dataset=' + encodeURIComponent(dataset) +
+        '&timezone=' + encodeURIComponent(timezone),
       {
         method: 'get',
         headers: {
@@ -251,16 +263,54 @@ function getEventMetadataCatalog(request) {
     const schema = Array.isArray(data.schema) ? data.schema : [];
 
     return schema.filter(function(field) {
-      return field && /^event_meta_/.test(field.name);
+      return field && isMetadataFieldId(field.name);
     });
   } catch (error) {
     return [];
   }
 }
 
+function isMetadataFieldId(fieldId) {
+  return Boolean(
+    typeof fieldId === 'string' &&
+    fieldId.indexOf(METADATA_FIELD_PREFIX) === 0
+  );
+}
+
+function requestUsesMetadataFields(request) {
+  const fields = request && Array.isArray(request.fields) ? request.fields : [];
+  const rawFilters = request && (request.dimensionsFilters || request.dimensionFilters)
+    ? (request.dimensionsFilters || request.dimensionFilters)
+    : [];
+  let fieldReferences = fields.map(function(field) {
+    return field && field.name;
+  });
+
+  if (Array.isArray(rawFilters)) {
+    rawFilters.forEach(function(rawFilter) {
+      expandRawFilterParts(rawFilter).forEach(function(filterPart) {
+        const filterFieldIds = getFilterFieldIds(filterPart);
+        if (Array.isArray(filterFieldIds)) {
+          fieldReferences = fieldReferences.concat(filterFieldIds);
+        }
+      });
+    });
+  }
+
+  return fieldReferences.some(function(fieldReference) {
+    return fieldReference && (
+      isMetadataFieldId(fieldReference) ||
+      isMetadataFieldId(normalizeFieldKey(fieldReference))
+    );
+  });
+}
+
 function getData(request) {
   const config = getValidatedConfig(request);
-  const fieldCatalog = getFieldCatalog(request);
+  const fieldCatalog = getFieldCatalog(
+    request,
+    requestUsesMetadataFields(request)
+  );
   const fieldCatalogById = buildFieldCatalogById(fieldCatalog);
   const fieldCatalogByAlias = buildFieldCatalogByAlias(fieldCatalog);
   const requestedFieldIds = getRequestedFieldIds(request, fieldCatalogById);
@@ -575,7 +625,9 @@ function normalizeSingleFilter(rawFilter, dataset, fieldCatalogById, fieldCatalo
       return filters;
     }
 
-    const allowedOperators = filterRules[fieldId];
+    const allowedOperators = filterRules[fieldId] || (
+      isMetadataFieldId(fieldId) ? METADATA_FILTER_OPERATORS : null
+    );
 
     if (!allowedOperators) {
       throwUserError('Filtering is not supported for ' + fieldId + '.');
