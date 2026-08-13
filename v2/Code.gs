@@ -1,12 +1,14 @@
 /**
- * Looker Studio Community Connector
+ * Google Data Studio Community Connector
  * Connects to the dashboard proxy endpoint.
  * Supports grouped scorecards, histograms, breakdowns, filter pushdown, and
  * multi-dimension tables for a curated field catalog.
  */
 
-const LOOKER_ENDPOINT = 'https://simpleanalytics.com/api/looker/query';
-const LOOKER_SCHEMA_ENDPOINT = 'https://simpleanalytics.com/api/looker/schema';
+const DATA_STUDIO_ENDPOINT = 'https://simpleanalytics.com/api/looker/query';
+const DATA_STUDIO_SCHEMA_ENDPOINT = 'https://simpleanalytics.com/api/looker/schema';
+const DATA_STUDIO_AUTH_ENDPOINT = 'https://simpleanalytics.com/api/looker/auth';
+const API_KEY_PROPERTY = 'dscc.key';
 const DEFAULT_TIMEZONE = 'Etc/UTC';
 const MAX_METRICS = 10;
 const MAX_DIMENSIONS = 5;
@@ -163,7 +165,73 @@ function createMetricField(name, label, isReaggregatable) {
 }
 
 function getAuthType() {
-  return { type: 'NONE' };
+  const cc = DataStudioApp.createCommunityConnector();
+
+  return cc
+    .newAuthTypeResponse()
+    .setAuthType(cc.AuthType.KEY)
+    .setHelpUrl('https://docs.simpleanalytics.com/google-data-studio')
+    .build();
+}
+
+function setCredentials(request) {
+  const apiKey = normalizeText(request && request.key);
+
+  if (!isValidApiKey(apiKey)) {
+    return { errorCode: 'INVALID_CREDENTIALS' };
+  }
+
+  PropertiesService.getUserProperties().setProperty(API_KEY_PROPERTY, apiKey);
+  return { errorCode: 'NONE' };
+}
+
+function resetAuth() {
+  PropertiesService.getUserProperties().deleteProperty(API_KEY_PROPERTY);
+}
+
+function isAuthValid() {
+  return isValidApiKey(getStoredApiKey());
+}
+
+function getStoredApiKey() {
+  return normalizeText(
+    PropertiesService.getUserProperties().getProperty(API_KEY_PROPERTY)
+  );
+}
+
+function getRequiredApiKey() {
+  const apiKey = getStoredApiKey();
+
+  if (!apiKey) {
+    throwUserError('Your Simple Analytics API key is missing. Reconnect this data source to authenticate again.');
+  }
+
+  return apiKey;
+}
+
+function isValidApiKey(apiKey) {
+  if (!/^sa_api_key_[a-z0-9_-]+$/i.test(apiKey)) {
+    return false;
+  }
+
+  try {
+    const response = UrlFetchApp.fetch(DATA_STUDIO_AUTH_ENDPOINT, {
+      method: 'get',
+      headers: {
+        'Api-Key': apiKey
+      },
+      muteHttpExceptions: true
+    });
+
+    if (response.getResponseCode() !== 200) {
+      return false;
+    }
+
+    const payload = JSON.parse(response.getContentText());
+    return Boolean(payload && payload.valid === true);
+  } catch (error) {
+    return false;
+  }
 }
 
 function isAdminUser() {
@@ -185,18 +253,10 @@ function getConfig() {
     .setAllowOverride(false);
 
   config
-    .newTextInput()
-    .setId('apiKey')
-    .setName('API Key')
-    .setHelpText('Your API key for authentication')
-    .setPlaceholder('sa_api_key_xxx')
-    .setAllowOverride(false);
-
-  config
     .newSelectSingle()
     .setId('dataset')
     .setName('Dataset')
-    .setHelpText('Choose which dataset this Looker Studio data source exposes')
+    .setHelpText('Choose which dataset this Google Data Studio data source exposes')
     .addOption(config.newOptionBuilder().setLabel('Pageviews').setValue(DATASETS.PAGEVIEWS))
     .addOption(config.newOptionBuilder().setLabel('Events').setValue(DATASETS.EVENTS))
     .setAllowOverride(false);
@@ -233,7 +293,7 @@ function getFieldCatalog(request, includeMetadata) {
 function getMetadataCatalog(request, dataset) {
   const configParams = request && request.configParams ? request.configParams : {};
   const hostname = normalizeHostname(configParams.hostname);
-  const apiKey = normalizeText(configParams.apiKey);
+  const apiKey = getStoredApiKey();
   const timezone = normalizeText(configParams.timezone) || DEFAULT_TIMEZONE;
 
   if (!hostname || !apiKey) {
@@ -242,7 +302,7 @@ function getMetadataCatalog(request, dataset) {
 
   try {
     const response = UrlFetchApp.fetch(
-      LOOKER_SCHEMA_ENDPOINT +
+      DATA_STUDIO_SCHEMA_ENDPOINT +
         '?hostname=' + encodeURIComponent(hostname) +
         '&dataset=' + encodeURIComponent(dataset) +
         '&timezone=' + encodeURIComponent(timezone),
@@ -344,7 +404,7 @@ function getRequestedFieldIds(request, fieldCatalogById) {
   });
 
   if (!requestedFieldIds.length) {
-    throwUserError('Looker Studio did not request any fields.');
+    throwUserError('Google Data Studio did not request any fields.');
   }
 
   const invalidFields = requestedFieldIds.filter(function(fieldId) {
@@ -377,16 +437,12 @@ function buildFieldCatalogByAlias(fieldCatalog) {
 function getValidatedConfig(request) {
   const configParams = request && request.configParams ? request.configParams : {};
   const hostname = normalizeHostname(configParams.hostname);
-  const apiKey = normalizeText(configParams.apiKey);
+  const apiKey = getRequiredApiKey();
   const timezone = normalizeText(configParams.timezone) || DEFAULT_TIMEZONE;
   const dataset = getConfiguredDataset(request);
 
   if (!hostname) {
     throwUserError('Please enter a valid website hostname.');
-  }
-
-  if (!apiKey) {
-    throwUserError('Please enter a valid API key.');
   }
 
   return {
@@ -418,7 +474,7 @@ function getValidatedDateRange(request) {
   const endDate = normalizeText(dateRange.endDate);
 
   if (!startDate || !endDate) {
-    throwUserError('Looker Studio did not provide a valid date range.');
+    throwUserError('Google Data Studio did not provide a valid date range.');
   }
 
   return {
@@ -883,7 +939,7 @@ function fetchJson(payload, apiKey) {
   var response;
 
   try {
-    response = UrlFetchApp.fetch(LOOKER_ENDPOINT, {
+    response = UrlFetchApp.fetch(DATA_STUDIO_ENDPOINT, {
       method: 'post',
       contentType: 'application/json',
       payload: JSON.stringify(payload),
